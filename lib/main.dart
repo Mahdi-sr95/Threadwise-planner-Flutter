@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
+import 'app_shell.dart';
 import 'screens/courses_screen.dart';
+import 'screens/add_course_screen.dart';
 import 'screens/plan_screen.dart';
 import 'screens/settings_screen.dart';
-import 'screens/add_course_screen.dart';
+
+import 'state/courses_provider.dart';
+import 'state/plan_provider.dart';
+import 'state/settings_provider.dart';
 
 void main() {
   runApp(const ThreadWiseApp());
@@ -14,51 +21,51 @@ class ThreadWiseApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'ThreadWise Planner',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        colorSchemeSeed: Colors.indigo,
-      ),
-      home: const MainScaffold(),
+    final router = GoRouter(
+      initialLocation: '/courses',
+      routes: [
+        ShellRoute(
+          builder: (context, state, child) => AppShell(child: child),
+          routes: [
+            GoRoute(
+              path: '/courses',
+              builder: (_, __) => const CoursesScreen(),
+              routes: [
+                GoRoute(
+                  path: 'add',
+                  builder: (_, __) => const AddCourseScreen(),
+                ),
+              ],
+            ),
+            GoRoute(path: '/plan', builder: (_, __) => const PlanScreen()),
+            GoRoute(
+              path: '/settings',
+              builder: (_, __) => const SettingsScreen(),
+            ),
+          ],
+        ),
+      ],
     );
-  }
-}
 
-class MainScaffold extends StatefulWidget {
-  const MainScaffold({super.key});
-
-  @override
-  State<MainScaffold> createState() => _MainScaffoldState();
-}
-
-class _MainScaffoldState extends State<MainScaffold> {
-  int _index = 0;
-
-  final _pages = const [CoursesScreen()];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: _pages[_index],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.school), label: 'Courses'),
-          BottomNavigationBarItem(icon: Icon(Icons.view_agenda), label: 'Plan'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
-        ],
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (_) => CoursesProvider()..seedFromMock(),
+        ),
+        ChangeNotifierProvider(create: (_) => PlanProvider()),
+        ChangeNotifierProvider(create: (_) => SettingsProvider()),
+      ],
+      child: MaterialApp.router(
+        title: 'ThreadWise Planner',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
+        darkTheme: ThemeData(
+          useMaterial3: true,
+          brightness: Brightness.dark,
+          colorSchemeSeed: Colors.indigo,
+        ),
+        routerConfig: router,
       ),
-
-      // Optional: a floating action button to open Add Course
-      // (UI only; no logic needed inside AddCourseScreen yet)
     );
   }
 }

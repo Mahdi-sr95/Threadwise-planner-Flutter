@@ -1,16 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+
+import '../state/courses_provider.dart';
+import '../state/plan_provider.dart';
 
 class CoursesScreen extends StatelessWidget {
   const CoursesScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final coursesProv = context.watch<CoursesProvider>();
+    final planProv = context.watch<PlanProvider>();
+    final courses = coursesProv.courses;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Courses'),
         actions: [
           IconButton(
-            onPressed: null, // TODO: navigate to AddCourseScreen
+            onPressed: () => context.go('/courses/add'),
             icon: const Icon(Icons.add),
             tooltip: 'Add course',
           ),
@@ -21,60 +30,44 @@ class CoursesScreen extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           children: [
             Text('Your courses', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            Text(
-              'Add courses with deadlines and difficulty, then generate a plan.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
 
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    const Icon(Icons.school_outlined, size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'No courses yet',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Tap + to add your first course.',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ],
+            if (courses.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No courses yet. Tap + to add one.'),
+                ),
+              )
+            else
+              ...List.generate(courses.length, (i) {
+                final c = courses[i];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Card(
+                    child: ListTile(
+                      title: Text(c.name),
+                      subtitle: Text(
+                        'Deadline: ${c.deadline.toLocal()} • ${c.difficulty.name}',
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => coursesProv.removeAt(i),
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
+                  ),
+                );
+              }),
 
             const SizedBox(height: 16),
-
-            Text('Planning', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              value: 'Waterfall',
-              items: const [
-                DropdownMenuItem(value: 'Waterfall', child: Text('Waterfall')),
-                DropdownMenuItem(value: 'Sandwich', child: Text('Sandwich')),
-                DropdownMenuItem(
-                  value: 'Sequential',
-                  child: Text('Sequential'),
-                ),
-                DropdownMenuItem(
-                  value: 'Random Mix',
-                  child: Text('Random Mix'),
-                ),
-              ],
-              onChanged: null,
+            DropdownButtonFormField<Strategy>(
+              value: planProv.strategy,
+              items: Strategy.values
+                  .map((s) => DropdownMenuItem(value: s, child: Text(s.label)))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) planProv.setStrategy(v);
+              },
               decoration: const InputDecoration(
                 labelText: 'Strategy',
                 border: OutlineInputBorder(),
@@ -84,7 +77,12 @@ class CoursesScreen extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: null,
+                onPressed: courses.isEmpty
+                    ? null
+                    : () async {
+                        await planProv.generateFromMock();
+                        if (context.mounted) context.go('/plan');
+                      },
                 icon: const Icon(Icons.auto_awesome),
                 label: const Text('Generate Plan'),
               ),
