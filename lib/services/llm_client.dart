@@ -2,15 +2,19 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 /// Client for interacting with Hugging Face LLM API
+/// Uses the new router.huggingface.co endpoint (2026)
 /// Supports chat completion format with retry logic and error handling
 class LLMClient {
-  final String apiUrl;
+  // New HuggingFace router endpoint (replaces api-inference.huggingface.co)
+  static const String apiUrl = 'https://router.huggingface.co/v1/chat/completions';
+  
   final String apiToken;
+  final String model;
 
   LLMClient({
     required this.apiToken,
-    String model = 'meta-llama/Llama-3.2-3B-Instruct',
-  }) : apiUrl = 'https://api-inference.huggingface.co/models/$model/v1/chat/completions';
+    this.model = 'meta-llama/Llama-3.2-3B-Instruct',
+  });
 
   /// Send a prompt to the LLM and return the response
   /// Automatically retries on model loading (503) or network errors
@@ -45,6 +49,7 @@ class LLMClient {
             'Content-Type': 'application/json',
           },
           body: jsonEncode({
+            'model': model, // Model is now in body, not URL
             'messages': messages,
             'max_tokens': maxTokens,
             'temperature': 0.7,
@@ -64,6 +69,7 @@ class LLMClient {
           }
           return '';
         } else if (response.statusCode == 503) {
+          // Model is loading, retry with exponential backoff
           if (i < retries - 1) {
             await Future.delayed(waitTime);
             waitTime = waitTime * 2;
@@ -73,7 +79,7 @@ class LLMClient {
         } else if (response.statusCode == 401) {
           throw Exception('Invalid API token. Check your HuggingFace token.');
         } else if (response.statusCode == 404 || response.statusCode == 410) {
-          throw Exception('Chat endpoint not available for this model.');
+          throw Exception('Model not found or endpoint not available.');
         } else {
           final errorBody = response.body;
           throw Exception('API Error ${response.statusCode}: $errorBody');
@@ -100,6 +106,7 @@ class LLMClient {
       final response = await sendPrompt(
         'Respond with just "OK"',
         systemPrompt: 'You are a helpful assistant.',
+        maxTokens: 10,
       );
       return response.isNotEmpty;
     } catch (e) {
