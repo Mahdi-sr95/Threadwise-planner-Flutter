@@ -29,18 +29,18 @@ class ThreadWiseApp extends StatelessWidget {
           routes: [
             GoRoute(
               path: '/courses',
-              builder: (_, __) => const CoursesScreen(),
+              builder: (context, state) => const CoursesScreen(),
               routes: [
                 GoRoute(
                   path: 'add',
-                  builder: (_, __) => const AddCourseScreen(),
+                  builder: (context, state) => const AddCourseScreen(),
                 ),
               ],
             ),
-            GoRoute(path: '/plan', builder: (_, __) => const PlanScreen()),
+            GoRoute(path: '/plan', builder: (context, state) => const PlanScreen()),
             GoRoute(
               path: '/settings',
-              builder: (_, __) => const SettingsScreen(),
+              builder: (context, state) => const SettingsScreen(),
             ),
           ],
         ),

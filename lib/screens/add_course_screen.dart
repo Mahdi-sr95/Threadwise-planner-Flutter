@@ -106,11 +106,15 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                 ),
                 textInputAction: TextInputAction.next,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty)
+                  if (v == null || v.trim().isEmpty) {
                     return 'Course name is required';
-                  if (v.trim().length < 2) return 'Too short';
+                  }
+                  if (v.trim().length < 2) {
+                    return 'Too short';
+                  }
                   return null;
                 },
+
               ),
 
               const SizedBox(height: 12),
