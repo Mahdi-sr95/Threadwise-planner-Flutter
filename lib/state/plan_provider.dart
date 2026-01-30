@@ -1,62 +1,54 @@
 import 'package:flutter/foundation.dart';
-import '../models/study_task.dart';
 import '../models/course.dart';
+import '../models/study_task.dart';
+import '../models/enums.dart';
+import '../services/llm_client.dart';
+import '../config/secrets.dart';
 import 'settings_provider.dart';
 
-enum Strategy { waterfall, sandwich, sequential, randomMix }
-
-extension StrategyLabel on Strategy {
-  String get label => switch (this) {
-        Strategy.waterfall => 'Waterfall',
-        Strategy.sandwich => 'Sandwich',
-        Strategy.sequential => 'Sequential',
-        Strategy.randomMix => 'Random Mix',
-      };
-}
-
+/// Provider for managing study plan generation and state
+/// Handles strategy selection, task generation with Round-Robin scheduling
 class PlanProvider extends ChangeNotifier {
   Strategy _strategy = Strategy.waterfall;
   List<StudyTask> _tasks = [];
-  List<Course> _lastCourses = [];
-  AppSettings? _lastSettings;
   bool _loading = false;
   String? _error;
+  late final LLMClient _llmClient;
+
+  PlanProvider() {
+    _llmClient = LLMClient(apiToken: Secrets.huggingFaceToken);
+  }
 
   Strategy get strategy => _strategy;
-  List<StudyTask> get tasks => List.unmodifiable(_tasks);
+  List<StudyTask> get tasks => _tasks;
   bool get loading => _loading;
   String? get error => _error;
 
-  /// Change strategy and regenerate plan if courses exist
-  void setStrategy(Strategy s) {
-    if (_strategy == s) return;
-    _strategy = s;
+  /// Update the selected planning strategy
+  void setStrategy(Strategy newStrategy) {
+    _strategy = newStrategy;
     notifyListeners();
-
-    // Auto-regenerate plan if we already have courses
-    if (_lastCourses.isNotEmpty && _lastSettings != null) {
-      generatePlan(_lastCourses, _lastSettings!);
-    }
   }
 
-  /// Generate study plan from actual courses using settings
-  Future<void> generatePlan(List<Course> courses, AppSettings settings) async {
+  /// Generate study plan based on courses and user settings
+  /// Uses Round-Robin algorithm to distribute study sessions
+  Future<void> generatePlan(
+    List<Course> courses,
+    AppSettings settings,
+  ) async {
+    if (courses.isEmpty) {
+      _error = 'No courses available';
+      notifyListeners();
+      return;
+    }
+
     _loading = true;
     _error = null;
-    _lastCourses = List.from(courses);
-    _lastSettings = settings;
     notifyListeners();
 
     try {
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-
-      if (courses.isEmpty) {
-        _tasks = [];
-        return;
-      }
-
-      // Generate tasks based on strategy
-      _tasks = _generateTasksByStrategy(courses, settings);
+      _tasks = await _generateTasksLocally(courses, settings);
+      _error = null;
     } catch (e) {
       _error = 'Failed to generate plan: $e';
       _tasks = [];
@@ -66,283 +58,188 @@ class PlanProvider extends ChangeNotifier {
     }
   }
 
-  /// Generate tasks using the selected strategy
-  List<StudyTask> _generateTasksByStrategy(
+  /// Generate tasks using Round-Robin scheduling algorithm
+  /// Each session is 2 hours max, with breaks between sessions
+  Future<List<StudyTask>> _generateTasksLocally(
     List<Course> courses,
     AppSettings settings,
-  ) {
-    switch (_strategy) {
-      case Strategy.waterfall:
-        return _generateWaterfall(courses, settings);
-      case Strategy.sandwich:
-        return _generateSandwich(courses, settings);
-      case Strategy.sequential:
-        return _generateSequential(courses, settings);
-      case Strategy.randomMix:
-        return _generateRandomMix(courses, settings);
-    }
-  }
+  ) async {
+    // Each study session is 2 hours
+    const double sessionDurationHours = 2.0;
+    
+    // Sort courses based on selected strategy
+    final sortedCourses = _sortCoursesByStrategy(courses);
 
-  /// Waterfall: Round-robin with hardest courses first
-  /// Max 2 consecutive sessions per course before rotating
-  List<StudyTask> _generateWaterfall(
-    List<Course> courses,
-    AppSettings settings,
-  ) {
-    // Sort by difficulty (hardest first), then by deadline
-    final sorted = List<Course>.from(courses);
-    sorted.sort((a, b) {
-      final diffCompare = b.difficulty.index.compareTo(a.difficulty.index);
-      if (diffCompare != 0) return diffCompare;
-      return a.deadline.compareTo(b.deadline);
-    });
-
-    return _generateRoundRobin(sorted, settings, maxConsecutive: 2);
-  }
-
-  /// Sandwich: Round-robin alternating between hard and easy
-  /// Max 2 consecutive sessions per course
-  List<StudyTask> _generateSandwich(
-    List<Course> courses,
-    AppSettings settings,
-  ) {
-    // Sort by difficulty
-    final sorted = List<Course>.from(courses);
-    sorted.sort((a, b) => b.difficulty.index.compareTo(a.difficulty.index));
-
-    // Interleave hard and easy courses
-    final List<Course> sandwiched = [];
-    int left = 0; // Hard courses
-    int right = sorted.length - 1; // Easy courses
-
-    while (left <= right) {
-      if (left == right) {
-        sandwiched.add(sorted[left]);
-      } else {
-        sandwiched.add(sorted[left]); // Add hard
-        sandwiched.add(sorted[right]); // Add easy
-      }
-      left++;
-      right--;
-    }
-
-    return _generateRoundRobin(sandwiched, settings, maxConsecutive: 2);
-  }
-
-  /// Sequential: Complete all tasks for one course before moving to next
-  List<StudyTask> _generateSequential(
-    List<Course> courses,
-    AppSettings settings,
-  ) {
-    // Sort courses by deadline (earliest first)
-    final sorted = List<Course>.from(courses);
-    sorted.sort((a, b) => a.deadline.compareTo(b.deadline));
-
-    final tasks = <StudyTask>[];
-    final now = DateTime.now();
-    var currentTime = DateTime(now.year, now.month, now.day, 9, 0);
-
-    // Process each course completely before moving to next
-    for (final course in sorted) {
-      final courseTasks = _generateAllTasksForCourse(
-        course,
-        currentTime,
-        settings,
-      );
-      tasks.addAll(courseTasks);
-
-      // Update time to continue after last task + break
-      if (courseTasks.isNotEmpty) {
-        final lastTask = courseTasks.last;
-        currentTime = lastTask.dateTime.add(
-          Duration(
-            hours: lastTask.durationHours.floor(),
-            minutes: ((lastTask.durationHours % 1) * 60).round() +
-                settings.breakMinutes,
-          ),
-        );
-      }
-    }
-
-    return tasks;
-  }
-
-  /// Random Mix: Shuffle courses randomly and use round-robin
-  List<StudyTask> _generateRandomMix(
-    List<Course> courses,
-    AppSettings settings,
-  ) {
-    final shuffled = List<Course>.from(courses);
-    shuffled.shuffle();
-    // Random mix doesn't enforce max consecutive (can be random)
-    return _generateRoundRobin(shuffled, settings, maxConsecutive: null);
-  }
-
-  /// Round-robin scheduling with max consecutive sessions per course
-  /// This ensures variety and prevents studying one subject too long
-  List<StudyTask> _generateRoundRobin(
-    List<Course> orderedCourses,
-    AppSettings settings, {
-    int? maxConsecutive, // null means no limit (for random)
-  }) {
-    // Calculate total sessions needed for each course
-    const sessionDuration = 2.5; // hours
-    final courseData = orderedCourses.map((course) {
-      final totalSessions = (course.studyHours / sessionDuration).ceil();
+    // Calculate how many 2-hour sessions each course needs
+    final courseSessionInfo = sortedCourses.map((course) {
+      final totalSessions = (course.studyHours / sessionDurationHours).ceil();
       return {
         'course': course,
         'totalSessions': totalSessions,
         'completedSessions': 0,
+        'remainingHours': course.studyHours,
       };
     }).toList();
 
     final tasks = <StudyTask>[];
     final now = DateTime.now();
-    var currentTime = DateTime(now.year, now.month, now.day, 9, 0);
-    var dailyHours = 0.0;
+    DateTime currentTime = DateTime(now.year, now.month, now.day, 9, 0);
+    double dailyHours = 0.0;
 
-    // Round-robin through courses
-    while (courseData.any((c) => 
-        (c['completedSessions'] as int) < (c['totalSessions'] as int))) {
-      for (final data in courseData) {
-        final course = data['course'] as Course;
-        final totalSessions = data['totalSessions'] as int;
-        var completedSessions = data['completedSessions'] as int;
+    // Round-Robin: cycle through courses until all are complete
+    bool anyIncomplete = true;
+    while (anyIncomplete) {
+      anyIncomplete = false;
 
-        // Skip if course is already done
+      for (final info in courseSessionInfo) {
+        final course = info['course'] as Course;
+        final totalSessions = info['totalSessions'] as int;
+        var completedSessions = info['completedSessions'] as int;
+        var remainingHours = info['remainingHours'] as double;
+
+        // Skip if this course is finished
         if (completedSessions >= totalSessions) continue;
 
-        // Schedule up to maxConsecutive sessions for this course
-        final sessionsToSchedule = maxConsecutive != null
-            ? (totalSessions - completedSessions).clamp(0, maxConsecutive)
-            : (totalSessions - completedSessions);
+        anyIncomplete = true;
 
-        for (int i = 0; i < sessionsToSchedule; i++) {
-          // Check daily limit
-          if (dailyHours + sessionDuration > settings.maxHoursPerDay) {
+        // For Waterfall and Sandwich: max 2 consecutive sessions per course
+        // For Sequential: complete entire course before moving to next
+        // For Random Mix: no limit (random distribution)
+        int sessionsToScheduleNow = 1;
+        
+        if (_strategy == Strategy.waterfall || _strategy == Strategy.sandwich) {
+          // Schedule up to 2 consecutive sessions
+          sessionsToScheduleNow = (totalSessions - completedSessions).clamp(1, 2);
+        } else if (_strategy == Strategy.sequential) {
+          // Schedule all remaining sessions for this course
+          sessionsToScheduleNow = totalSessions - completedSessions;
+        } else if (_strategy == Strategy.randomMix) {
+          // Random: can be 1 or 2 sessions
+          sessionsToScheduleNow = (totalSessions - completedSessions).clamp(1, 2);
+        }
+
+        // Schedule the determined number of sessions
+        for (int i = 0; i < sessionsToScheduleNow; i++) {
+          if (completedSessions >= totalSessions) break;
+
+          // Check if we exceeded daily limit
+          if (dailyHours + sessionDurationHours > settings.maxHoursPerDay) {
             // Move to next day
-            currentTime = _getNextDayStart(currentTime, settings);
+            currentTime = _getNextDayStart(currentTime);
+            currentTime = _skipWeekendsIfNeeded(currentTime, settings);
             dailyHours = 0.0;
           }
 
-          // Skip weekends if needed
-          currentTime = _skipWeekendsIfNeeded(currentTime, settings);
+          // Calculate actual duration for this session
+          final actualDuration = remainingHours >= sessionDurationHours
+              ? sessionDurationHours
+              : remainingHours;
 
-          // Create task
-          final actualDuration = sessionDuration.clamp(
-            0.0,
-            course.studyHours - (completedSessions * sessionDuration),
-          );
+          // Create study task
+          tasks.add(StudyTask(
+            subject: course.name,
+            task: 'Study ${course.name} - Session ${completedSessions + 1}',
+            dateTime: currentTime,
+            durationHours: actualDuration,
+            difficulty: course.difficulty,
+          ));
 
-          tasks.add(
-            StudyTask(
-              subject: course.name,
-              task: 'Study session ${completedSessions + 1} of $totalSessions',
-              dateTime: currentTime,
-              durationHours: actualDuration,
-              difficulty: course.difficulty,
-            ),
-          );
-
+          // Update tracking variables
           completedSessions++;
+          remainingHours -= actualDuration;
           dailyHours += actualDuration;
 
-          // Move time forward by session duration + break
-          currentTime = currentTime.add(
-            Duration(
-              hours: actualDuration.floor(),
-              minutes: ((actualDuration % 1) * 60).round() +
-                  settings.breakMinutes,
-            ),
-          );
+          // Move time forward by session duration plus break
+          currentTime = currentTime.add(Duration(
+            hours: actualDuration.floor(),
+            minutes: ((actualDuration - actualDuration.floor()) * 60).round() +
+                settings.breakMinutes,
+          ));
         }
 
-        // Update completed count
-        data['completedSessions'] = completedSessions;
+        // Update the info map with new values
+        info['completedSessions'] = completedSessions;
+        info['remainingHours'] = remainingHours;
+
+        // For Sequential strategy, don't break the loop - continue with same course
+        if (_strategy == Strategy.sequential) {
+          // Already scheduled all sessions for this course above
+          continue;
+        }
       }
     }
 
     return tasks;
   }
 
-  /// Generate all tasks for a single course (used in Sequential only)
-  List<StudyTask> _generateAllTasksForCourse(
-    Course course,
-    DateTime startTime,
-    AppSettings settings,
-  ) {
-    final tasks = <StudyTask>[];
-    var currentTime = startTime;
-    var dailyHours = 0.0;
+  /// Sort courses according to selected strategy
+  List<Course> _sortCoursesByStrategy(List<Course> courses) {
+    final sorted = List<Course>.from(courses);
 
-    const sessionDuration = 2.5;
-    final numberOfSessions = (course.studyHours / sessionDuration).ceil();
-    final actualSessionDuration = course.studyHours / numberOfSessions;
+    switch (_strategy) {
+      case Strategy.waterfall:
+        // Hardest courses first
+        sorted.sort((a, b) {
+          final diffCompare = b.difficulty.index.compareTo(a.difficulty.index);
+          if (diffCompare != 0) return diffCompare;
+          return a.deadline.compareTo(b.deadline);
+        });
+        break;
 
-    for (int i = 0; i < numberOfSessions; i++) {
-      // Check daily limit
-      if (dailyHours + actualSessionDuration > settings.maxHoursPerDay) {
-        currentTime = _getNextDayStart(currentTime, settings);
-        dailyHours = 0.0;
-      }
+      case Strategy.sandwich:
+        // Alternate between hard and easy
+        sorted.sort((a, b) => b.difficulty.index.compareTo(a.difficulty.index));
+        final result = <Course>[];
+        int left = 0;
+        int right = sorted.length - 1;
+        while (left <= right) {
+          if (left <= right) result.add(sorted[left++]);
+          if (left <= right) result.add(sorted[right--]);
+        }
+        return result;
 
-      // Skip weekends if needed
-      currentTime = _skipWeekendsIfNeeded(currentTime, settings);
+      case Strategy.sequential:
+        // By deadline (earliest first)
+        sorted.sort((a, b) => a.deadline.compareTo(b.deadline));
+        break;
 
-      tasks.add(
-        StudyTask(
-          subject: course.name,
-          task: 'Study session ${i + 1} of $numberOfSessions',
-          dateTime: currentTime,
-          durationHours: actualSessionDuration,
-          difficulty: course.difficulty,
-        ),
-      );
-
-      dailyHours += actualSessionDuration;
-
-      // Move time forward
-      currentTime = currentTime.add(
-        Duration(
-          hours: actualSessionDuration.floor(),
-          minutes: ((actualSessionDuration % 1) * 60).round() +
-              settings.breakMinutes,
-        ),
-      );
+      case Strategy.randomMix:
+        // Random order for variety
+        sorted.shuffle();
+        break;
     }
 
-    return tasks;
+    return sorted;
   }
 
-  /// Skip weekends if includeWeekends is false
+  /// Skip weekends if setting is disabled
   DateTime _skipWeekendsIfNeeded(DateTime date, AppSettings settings) {
     if (settings.includeWeekends) return date;
 
     var result = date;
-    while (result.weekday > 5) {
-      // Saturday=6, Sunday=7
+    while (result.weekday == DateTime.saturday ||
+        result.weekday == DateTime.sunday) {
       result = result.add(const Duration(days: 1));
       result = DateTime(result.year, result.month, result.day, 9, 0);
     }
     return result;
   }
 
-  /// Get next day start time (9 AM)
-  DateTime _getNextDayStart(DateTime current, AppSettings settings) {
-    var nextDay = DateTime(
+  /// Get next day start time at 9 AM
+  DateTime _getNextDayStart(DateTime current) {
+    final nextDay = DateTime(
       current.year,
       current.month,
       current.day + 1,
       9,
       0,
     );
-    return _skipWeekendsIfNeeded(nextDay, settings);
+    return nextDay;
   }
 
-  void clear() {
+  /// Clear all tasks and reset state
+  void clearPlan() {
     _tasks = [];
-    _lastCourses = [];
-    _lastSettings = null;
     _error = null;
     notifyListeners();
   }

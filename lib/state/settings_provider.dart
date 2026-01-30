@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+/// Model for user study preferences and constraints
+/// Controls daily limits, break times, and weekend inclusion
 class AppSettings {
   final double maxHoursPerDay;
   final int breakMinutes;
@@ -24,10 +26,11 @@ class AppSettings {
   }
 }
 
+/// Provider managing user settings state
 class SettingsProvider extends ChangeNotifier {
   AppSettings _settings = const AppSettings(
     maxHoursPerDay: 8,
-    breakMinutes: 30,
+    breakMinutes: 15,
     includeWeekends: true,
   );
 

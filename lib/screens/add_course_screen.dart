@@ -7,6 +7,7 @@ import '../models/course.dart';
 import '../models/enums.dart';
 import '../state/courses_provider.dart';
 
+/// Screen for adding a new course with name, deadline, difficulty, and study hours
 class AddCourseScreen extends StatefulWidget {
   const AddCourseScreen({super.key});
 
@@ -17,7 +18,7 @@ class AddCourseScreen extends StatefulWidget {
 class _AddCourseScreenState extends State<AddCourseScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
-  final _studyHoursCtrl = TextEditingController(); // New controller for study hours
+  final _studyHoursCtrl = TextEditingController();
 
   DateTime? _deadline;
   Difficulty _difficulty = Difficulty.medium;
@@ -29,6 +30,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     super.dispose();
   }
 
+  /// Show date picker dialog for deadline selection
   Future<void> _pickDeadline() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -45,12 +47,14 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     }
   }
 
+  /// Format date as YYYY-MM-DD
   String _formatDate(DateTime d) {
     final mm = d.month.toString().padLeft(2, '0');
     final dd = d.day.toString().padLeft(2, '0');
     return '${d.year}-$mm-$dd';
   }
 
+  /// Validate and save the course
   void _save() {
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
@@ -71,7 +75,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
     context.read<CoursesProvider>().addCourses(course);
 
-    // Go back to courses list
+    // Navigate back to courses list
     context.go('/courses');
   }
 
@@ -100,7 +104,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Course name
+              // Course name input field
               TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(
@@ -122,7 +126,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
               const SizedBox(height: 12),
 
-              // Study hours input
+              // Study hours input field
               TextFormField(
                 controller: _studyHoursCtrl,
                 decoration: const InputDecoration(
@@ -153,7 +157,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
               const SizedBox(height: 12),
 
-              // Deadline picker (UI)
+              // Deadline picker button
               InkWell(
                 onTap: _pickDeadline,
                 borderRadius: BorderRadius.circular(12),
@@ -168,9 +172,9 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Difficulty
+              // Difficulty dropdown selector
               DropdownButtonFormField<Difficulty>(
-                value: _difficulty,
+                initialValue: _difficulty,
                 items: Difficulty.values
                     .map(
                       (d) => DropdownMenuItem(
@@ -191,7 +195,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
               const SizedBox(height: 20),
 
-              // Save/Cancel
+              // Save button
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
@@ -200,6 +204,8 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                 ),
               ),
               const SizedBox(height: 8),
+
+              // Cancel button
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
