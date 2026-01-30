@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../state/settings_provider.dart';
 import '../state/courses_provider.dart';
 import '../state/plan_provider.dart';
 
@@ -80,7 +81,8 @@ class CoursesScreen extends StatelessWidget {
                 onPressed: courses.isEmpty
                     ? null
                     : () async {
-                        await planProv.generateFromMock();
+                        final settings = context.read<SettingsProvider>().settings;
+                        await planProv.generatePlan(courses, settings);
                         if (context.mounted) context.go('/plan');
                       },
                 icon: const Icon(Icons.auto_awesome),

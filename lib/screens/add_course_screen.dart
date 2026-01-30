@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -16,6 +17,7 @@ class AddCourseScreen extends StatefulWidget {
 class _AddCourseScreenState extends State<AddCourseScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
+  final _studyHoursCtrl = TextEditingController(); // New controller for study hours
 
   DateTime? _deadline;
   Difficulty _difficulty = Difficulty.medium;
@@ -23,6 +25,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _studyHoursCtrl.dispose();
     super.dispose();
   }
 
@@ -53,9 +56,9 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     if (!ok) return;
 
     if (_deadline == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please select a deadline')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a deadline')),
+      );
       return;
     }
 
@@ -63,6 +66,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       name: _nameCtrl.text.trim(),
       deadline: _deadline!,
       difficulty: _difficulty,
+      studyHours: double.parse(_studyHoursCtrl.text.trim()),
     );
 
     context.read<CoursesProvider>().addCourses(course);
@@ -114,7 +118,37 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                   }
                   return null;
                 },
+              ),
 
+              const SizedBox(height: 12),
+
+              // Study hours input
+              TextFormField(
+                controller: _studyHoursCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Study hours needed',
+                  hintText: 'e.g., 15',
+                  border: OutlineInputBorder(),
+                  suffixText: 'hours',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}')),
+                ],
+                textInputAction: TextInputAction.next,
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) {
+                    return 'Study hours required';
+                  }
+                  final num = double.tryParse(v.trim());
+                  if (num == null || num <= 0) {
+                    return 'Enter a valid positive number';
+                  }
+                  if (num > 200) {
+                    return 'Too many hours (max 200)';
+                  }
+                  return null;
+                },
               ),
 
               const SizedBox(height: 12),

@@ -50,7 +50,7 @@ class ThreadWiseApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(
-          create: (_) => CoursesProvider()..seedFromMock(),
+          create: (_) => CoursesProvider(),
         ),
         ChangeNotifierProvider(create: (_) => PlanProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
