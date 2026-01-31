@@ -1,11 +1,13 @@
 import 'enums.dart';
 
+/// Course model representing a subject with study requirements
+/// Stored locally with custom serialization
 class Course {
   final String id;
   final String name;
   final DateTime deadline;
   final Difficulty difficulty;
-  final double studyHours; // New field: total hours needed to study
+  final double studyHours;
   final DateTime createdAt;
 
   Course({
@@ -62,7 +64,7 @@ class Course {
 
   @override
   String toString() {
-    return 'Course(id: $id, name: $name, deadline: $deadline, difficulty: $difficulty, studyHours: $studyHours)';
+    return 'Course(id: $id, name: $name, deadline: $deadline, difficulty: ${difficulty.name}, studyHours: $studyHours)';
   }
 
   @override

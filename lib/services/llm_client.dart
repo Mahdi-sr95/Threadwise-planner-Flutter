@@ -1,13 +1,10 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-/// Client for interacting with Hugging Face LLM API
-/// Uses the new router.huggingface.co endpoint (2026)
-/// Supports chat completion format with retry logic and error handling
+/// Client for interacting with Hugging Face Router chat-completions endpoint.
 class LLMClient {
-  // New HuggingFace router endpoint (replaces api-inference.huggingface.co)
   static const String apiUrl = 'https://router.huggingface.co/v1/chat/completions';
-  
+
   final String apiToken;
   final String model;
 
@@ -16,83 +13,85 @@ class LLMClient {
     this.model = 'meta-llama/Llama-3.2-3B-Instruct',
   });
 
-  /// Send a prompt to the LLM and return the response
-  /// Automatically retries on model loading (503) or network errors
+  /// Sends a chat prompt and returns the assistant content as plain text.
+  /// Retries on transient failures (e.g., 503 model loading).
   Future<String> sendPrompt(
     String prompt, {
     int maxTokens = 2500,
     String? systemPrompt,
+    double temperature = 0.7,
+    double topP = 0.9,
+    int retries = 3,
   }) async {
-    final messages = <Map<String, String>>[];
-    
-    if (systemPrompt != null) {
-      messages.add({
-        'role': 'system',
-        'content': systemPrompt,
-      });
+    final List<Map<String, String>> messages = [];
+    if (systemPrompt != null && systemPrompt.trim().isNotEmpty) {
+      messages.add({'role': 'system', 'content': systemPrompt});
     }
+    messages.add({'role': 'user', 'content': prompt});
 
-    messages.add({
-      'role': 'user',
-      'content': prompt,
-    });
-
-    int retries = 3;
     Duration waitTime = const Duration(seconds: 3);
 
     for (int i = 0; i < retries; i++) {
       try {
-        final response = await http.post(
-          Uri.parse(apiUrl),
-          headers: {
-            'Authorization': 'Bearer $apiToken',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({
-            'model': model, // Model is now in body, not URL
-            'messages': messages,
-            'max_tokens': maxTokens,
-            'temperature': 0.7,
-            'top_p': 0.9,
-            'stream': false,
-          }),
-        ).timeout(const Duration(seconds: 60));
+        final response = await http
+            .post(
+              Uri.parse(apiUrl),
+              headers: {
+                'Authorization': 'Bearer $apiToken',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({
+                'model': model,
+                'messages': messages,
+                'max_tokens': maxTokens,
+                'temperature': temperature,
+                'top_p': topP,
+                'stream': false,
+              }),
+            )
+            .timeout(const Duration(seconds: 60));
 
         if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          if (data is Map && data.containsKey('choices')) {
-            final choices = data['choices'] as List;
+          final dynamic decoded = jsonDecode(response.body);
+          if (decoded is Map && decoded['choices'] is List) {
+            final List choices = decoded['choices'] as List;
             if (choices.isNotEmpty) {
-              final message = choices[0]['message'];
-              return message['content']?.toString().trim() ?? '';
+              final dynamic message = choices.first['message'];
+              final String? content = message is Map ? message['content']?.toString() : null;
+              return (content ?? '').trim();
             }
           }
           return '';
-        } else if (response.statusCode == 503) {
-          // Model is loading, retry with exponential backoff
+        }
+
+        if (response.statusCode == 503) {
           if (i < retries - 1) {
             await Future.delayed(waitTime);
-            waitTime = waitTime * 2;
+            waitTime = Duration(seconds: waitTime.inSeconds * 2);
             continue;
           }
           throw Exception('Model is still loading. Please try again later.');
-        } else if (response.statusCode == 401) {
+        }
+
+        if (response.statusCode == 401) {
           throw Exception('Invalid API token. Check your HuggingFace token.');
-        } else if (response.statusCode == 404 || response.statusCode == 410) {
+        }
+
+        if (response.statusCode == 404 || response.statusCode == 410) {
           throw Exception('Model not found or endpoint not available.');
-        } else {
-          final errorBody = response.body;
-          throw Exception('API Error ${response.statusCode}: $errorBody');
         }
+
+        throw Exception('API Error ${response.statusCode}: ${response.body}');
       } catch (e) {
-        if (e.toString().contains('SocketException') ||
-            e.toString().contains('TimeoutException')) {
-          if (i < retries - 1) {
-            await Future.delayed(const Duration(seconds: 2));
-            continue;
-          }
-          throw Exception('Network error. Check internet connection.');
+        final msg = e.toString();
+        final isNetwork =
+            msg.contains('SocketException') || msg.contains('TimeoutException');
+
+        if (isNetwork && i < retries - 1) {
+          await Future.delayed(const Duration(seconds: 2));
+          continue;
         }
+
         rethrow;
       }
     }
@@ -100,16 +99,16 @@ class LLMClient {
     throw Exception('Failed after $retries attempts');
   }
 
-  /// Test if the API connection works
+  /// Tests whether the API is reachable.
   Future<bool> testConnection() async {
     try {
       final response = await sendPrompt(
-        'Respond with just "OK"',
+        'Respond with just "OK".',
         systemPrompt: 'You are a helpful assistant.',
         maxTokens: 10,
       );
-      return response.isNotEmpty;
-    } catch (e) {
+      return response.trim().isNotEmpty;
+    } catch (_) {
       return false;
     }
   }

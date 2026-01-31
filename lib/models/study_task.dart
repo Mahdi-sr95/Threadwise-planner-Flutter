@@ -1,5 +1,6 @@
 import 'enums.dart';
 
+/// Study task model representing a scheduled study session
 class StudyTask {
   final String subject;
   final String task;
