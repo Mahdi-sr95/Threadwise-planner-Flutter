@@ -51,6 +51,11 @@ class CoursesScreen extends StatelessWidget {
             icon: const Icon(Icons.add),
             tooltip: 'Add course',
           ),
+          IconButton(
+            tooltip: 'Select an earlier course',
+            icon: const Icon(Icons.bookmarks_outlined),
+            onPressed: () => context.push('/saved-courses'),
+          ),
         ],
       ),
       body: SafeArea(

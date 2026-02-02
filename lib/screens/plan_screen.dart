@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../state/saved_courses_provider.dart';
+
 import '../models/enums.dart';
 import '../models/study_task.dart';
 import '../state/courses_provider.dart';
@@ -379,13 +381,20 @@ class PlanScreen extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () {
-              context.read<PlanProvider>().saveCurrentPlan(
-                notes: controller.text.trim().isEmpty
-                    ? null
-                    : controller.text.trim(),
+            onPressed: () async {
+              final notes = controller.text.trim().isEmpty
+                  ? null
+                  : controller.text.trim();
+
+              await context.read<PlanProvider>().saveCurrentPlan(notes: notes);
+
+              await context.read<SavedCoursesProvider>().ingestFromSavedPlan(
+                context.read<CoursesProvider>().courses,
               );
+
+              if (!context.mounted) return;
               Navigator.pop(context);
+
               ScaffoldMessenger.of(
                 context,
               ).showSnackBar(const SnackBar(content: Text('Plan saved!')));
