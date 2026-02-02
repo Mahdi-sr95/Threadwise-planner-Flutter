@@ -5,13 +5,12 @@ import 'package:provider/provider.dart';
 import '../models/study_task.dart';
 import '../state/plan_provider.dart';
 
+/// Displays the generated plan, allows strategy selection, saving and loading history.
 class PlanScreen extends StatelessWidget {
   const PlanScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final planProv = context.watch<PlanProvider>();
-
     return Scaffold(
       appBar: AppBar(
         title: Text('Plan (${planProv.strategy.label})'),
@@ -56,6 +55,19 @@ class PlanScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  IconData _strategyIcon(Strategy strategy) {
+    switch (strategy) {
+      case Strategy.waterfall:
+        return Icons.layers;
+      case Strategy.sandwich:
+        return Icons.flip;
+      case Strategy.sequential:
+        return Icons.timeline;
+      case Strategy.randomMix:
+        return Icons.shuffle;
+    }
   }
 }
 

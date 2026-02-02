@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -6,6 +7,7 @@ import '../models/course.dart';
 import '../models/enums.dart';
 import '../state/courses_provider.dart';
 
+/// Screen for adding a new course with name, deadline, difficulty, and study hours
 class AddCourseScreen extends StatefulWidget {
   const AddCourseScreen({super.key});
 
@@ -16,6 +18,7 @@ class AddCourseScreen extends StatefulWidget {
 class _AddCourseScreenState extends State<AddCourseScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
+  final _studyHoursCtrl = TextEditingController();
 
   DateTime? _deadline;
   Difficulty _difficulty = Difficulty.medium;
@@ -23,9 +26,11 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _studyHoursCtrl.dispose();
     super.dispose();
   }
 
+  /// Show date picker dialog for deadline selection
   Future<void> _pickDeadline() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -42,20 +47,22 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     }
   }
 
+  /// Format date as YYYY-MM-DD
   String _formatDate(DateTime d) {
     final mm = d.month.toString().padLeft(2, '0');
     final dd = d.day.toString().padLeft(2, '0');
     return '${d.year}-$mm-$dd';
   }
 
+  /// Validate and save the course
   void _save() {
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
 
     if (_deadline == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please select a deadline')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a deadline')),
+      );
       return;
     }
 
@@ -63,11 +70,12 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       name: _nameCtrl.text.trim(),
       deadline: _deadline!,
       difficulty: _difficulty,
+      studyHours: double.parse(_studyHoursCtrl.text.trim()),
     );
 
     context.read<CoursesProvider>().addCourses(course);
 
-    // Go back to courses list
+    // Navigate back to courses list
     context.go('/courses');
   }
 
@@ -96,7 +104,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Course name
+              // Course name input field
               TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(
@@ -106,16 +114,50 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                 ),
                 textInputAction: TextInputAction.next,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty)
+                  if (v == null || v.trim().isEmpty) {
                     return 'Course name is required';
-                  if (v.trim().length < 2) return 'Too short';
+                  }
+                  if (v.trim().length < 2) {
+                    return 'Too short';
+                  }
                   return null;
                 },
               ),
 
               const SizedBox(height: 12),
 
-              // Deadline picker (UI)
+              // Study hours input field
+              TextFormField(
+                controller: _studyHoursCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Study hours needed',
+                  hintText: 'e.g., 15',
+                  border: OutlineInputBorder(),
+                  suffixText: 'hours',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}')),
+                ],
+                textInputAction: TextInputAction.next,
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) {
+                    return 'Study hours required';
+                  }
+                  final num = double.tryParse(v.trim());
+                  if (num == null || num <= 0) {
+                    return 'Enter a valid positive number';
+                  }
+                  if (num > 200) {
+                    return 'Too many hours (max 200)';
+                  }
+                  return null;
+                },
+              ),
+
+              const SizedBox(height: 12),
+
+              // Deadline picker button
               InkWell(
                 onTap: _pickDeadline,
                 borderRadius: BorderRadius.circular(12),
@@ -130,9 +172,9 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Difficulty
+              // Difficulty dropdown selector
               DropdownButtonFormField<Difficulty>(
-                value: _difficulty,
+                initialValue: _difficulty,
                 items: Difficulty.values
                     .map(
                       (d) => DropdownMenuItem(
@@ -153,7 +195,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
               const SizedBox(height: 20),
 
-              // Save/Cancel
+              // Save button
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
@@ -162,6 +204,8 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                 ),
               ),
               const SizedBox(height: 8),
+
+              // Cancel button
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(

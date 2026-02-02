@@ -28,6 +28,20 @@ enum Strategy {
   sequential,
   randomMix;
 
+  // Display label for UI dropdowns and buttons
+  String get label {
+    switch (this) {
+      case Strategy.waterfall:
+        return 'Waterfall';
+      case Strategy.sandwich:
+        return 'Sandwich';
+      case Strategy.sequential:
+        return 'Sequential';
+      case Strategy.randomMix:
+        return 'Random Mix';
+    }
+  }
+
   String get displayName {
     switch (this) {
       case Strategy.waterfall:
@@ -41,6 +55,7 @@ enum Strategy {
     }
   }
 
+  // Detailed description explaining each strategy's behavior
   String get description {
     switch (this) {
       case Strategy.waterfall:
@@ -60,6 +75,7 @@ enum InputStatus {
   incomplete,
   complete;
 
+  // User-facing validation message for each status
   String get message {
     switch (this) {
       case InputStatus.unrelated:

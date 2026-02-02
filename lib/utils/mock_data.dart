@@ -8,21 +8,25 @@ class MockData {
       name: 'Mobile Application Development',
       deadline: DateTime(2026, 2, 15),
       difficulty: Difficulty.hard,
+      studyHours: 20.0, // Hard course needs more hours
     ),
     Course(
       name: 'Database Systems',
       deadline: DateTime(2026, 2, 20),
       difficulty: Difficulty.medium,
+      studyHours: 12.0,
     ),
     Course(
       name: 'Software Engineering',
       deadline: DateTime(2026, 2, 18),
       difficulty: Difficulty.medium,
+      studyHours: 10.0,
     ),
     Course(
       name: 'Computer Networks',
       deadline: DateTime(2026, 2, 22),
       difficulty: Difficulty.easy,
+      studyHours: 8.0,
     ),
   ];
 

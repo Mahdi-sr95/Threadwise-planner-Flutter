@@ -12,15 +12,51 @@ import 'state/courses_provider.dart';
 import 'state/plan_provider.dart';
 import 'state/settings_provider.dart';
 
-void main() {
+/// Main entry point - Initializes local storage and runs the app
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const ThreadWiseApp());
 }
 
-class ThreadWiseApp extends StatelessWidget {
+class ThreadWiseApp extends StatefulWidget {
   const ThreadWiseApp({super.key});
 
   @override
+  State<ThreadWiseApp> createState() => _ThreadWiseAppState();
+}
+
+class _ThreadWiseAppState extends State<ThreadWiseApp> {
+  late final CoursesProvider _coursesProvider;
+  bool _initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeProviders();
+  }
+
+  /// Initialize all providers with local storage
+  Future<void> _initializeProviders() async {
+    _coursesProvider = CoursesProvider();
+    await _coursesProvider.init();
+    
+    setState(() {
+      _initialized = true;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (!_initialized) {
+      return const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: CircularProgressIndicator(),
+          ),
+        ),
+      );
+    }
+
     final router = GoRouter(
       initialLocation: '/courses',
       routes: [
@@ -29,18 +65,21 @@ class ThreadWiseApp extends StatelessWidget {
           routes: [
             GoRoute(
               path: '/courses',
-              builder: (_, __) => const CoursesScreen(),
+              builder: (context, state) => const CoursesScreen(),
               routes: [
                 GoRoute(
                   path: 'add',
-                  builder: (_, __) => const AddCourseScreen(),
+                  builder: (context, state) => const AddCourseScreen(),
                 ),
               ],
             ),
-            GoRoute(path: '/plan', builder: (_, __) => const PlanScreen()),
+            GoRoute(
+              path: '/plan',
+              builder: (context, state) => const PlanScreen(),
+            ),
             GoRoute(
               path: '/settings',
-              builder: (_, __) => const SettingsScreen(),
+              builder: (context, state) => const SettingsScreen(),
             ),
           ],
         ),
@@ -49,16 +88,17 @@ class ThreadWiseApp extends StatelessWidget {
 
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(
-          create: (_) => CoursesProvider()..seedFromMock(),
-        ),
+        ChangeNotifierProvider.value(value: _coursesProvider),
         ChangeNotifierProvider(create: (_) => PlanProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
       ],
       child: MaterialApp.router(
         title: 'ThreadWise Planner',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
+        theme: ThemeData(
+          useMaterial3: true,
+          colorSchemeSeed: Colors.indigo,
+        ),
         darkTheme: ThemeData(
           useMaterial3: true,
           brightness: Brightness.dark,
