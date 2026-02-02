@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../models/enums.dart';
 import '../models/study_task.dart';
+import '../state/courses_provider.dart';
 import '../state/plan_provider.dart';
 
 /// Displays the generated plan, allows strategy selection, saving and loading history.
@@ -13,45 +14,434 @@ class PlanScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Plan (${planProv.strategy.label})'),
+        title: const Text('Study Plan'),
         actions: [
-          IconButton(
-            tooltip: 'Generate (mock)',
-            onPressed: () => context.read<PlanProvider>().generateFromMock(),
-            icon: const Icon(Icons.auto_awesome),
-          ),
-          IconButton(
-            tooltip: 'Clear',
-            onPressed: () => context.read<PlanProvider>().clear(),
-            icon: const Icon(Icons.delete_outline),
+          Consumer<PlanProvider>(
+            builder: (context, planProvider, _) {
+              return IconButton(
+                icon: Badge(
+                  label: Text('${planProvider.planHistory.length}'),
+                  isLabelVisible: planProvider.planHistory.isNotEmpty,
+                  child: const Icon(Icons.history),
+                ),
+                tooltip: 'Plan History',
+                onPressed: () => _showHistoryDialog(context),
+              );
+            },
           ),
         ],
       ),
-      body: SafeArea(
-        child: Builder(
-          builder: (_) {
-            if (planProv.loading) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (planProv.error != null) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(planProv.error!),
+      body: Column(
+        children: [
+          Card(
+            margin: const EdgeInsets.all(16),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Planning Strategy',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  Consumer<PlanProvider>(
+                    builder: (context, planProvider, _) {
+                      return SegmentedButton<Strategy>(
+                        segments: const [
+                          ButtonSegment(
+                            value: Strategy.waterfall,
+                            label: Text('Waterfall'),
+                            icon: Icon(Icons.layers),
+                          ),
+                          ButtonSegment(
+                            value: Strategy.sandwich,
+                            label: Text('Sandwich'),
+                            icon: Icon(Icons.flip),
+                          ),
+                          ButtonSegment(
+                            value: Strategy.sequential,
+                            label: Text('Sequential'),
+                            icon: Icon(Icons.timeline),
+                          ),
+                          ButtonSegment(
+                            value: Strategy.randomMix,
+                            label: Text('Random'),
+                            icon: Icon(Icons.shuffle),
+                          ),
+                        ],
+                        selected: {planProvider.strategy},
+                        onSelectionChanged: (newSelection) {
+                          planProvider.setStrategy(newSelection.first);
+                        },
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Consumer<PlanProvider>(
+                    builder: (context, planProvider, _) {
+                      return Text(
+                        planProvider.strategy.description,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Consumer2<CoursesProvider, PlanProvider>(
+                    builder: (context, coursesProvider, planProvider, _) {
+                      return FilledButton.icon(
+                        onPressed: planProvider.loading
+                            ? null
+                            : () async {
+                                await planProvider.generatePlan(
+                                  coursesProvider.courses,
+                                );
+                              },
+                        icon: planProvider.loading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.auto_awesome),
+                        label: Text(
+                          planProvider.loading
+                              ? 'Generating...'
+                              : 'Generate Plan',
+                        ),
+                      );
+                    },
+                  ),
                 ),
-              );
-            }
+                const SizedBox(width: 8),
+                Consumer<PlanProvider>(
+                  builder: (context, planProvider, _) {
+                    return IconButton.filledTonal(
+                      icon: const Icon(Icons.save),
+                      onPressed: planProvider.tasks.isEmpty
+                          ? null
+                          : () => _showSaveDialog(context),
+                      tooltip: 'Save Plan',
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: Consumer<PlanProvider>(
+              builder: (context, planProvider, _) {
+                if (planProvider.loading) {
+                  return const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('Generating your study plan...'),
+                      ],
+                    ),
+                  );
+                }
 
-            if (planProv.tasks.isEmpty) {
-              return _EmptyPlan(
-                onGenerate: () =>
-                    context.read<PlanProvider>().generateFromMock(),
-              );
-            }
+                if (planProvider.error != null) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.error_outline,
+                            size: 48,
+                            color: Colors.red,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Error: ${planProvider.error}',
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
 
-            return _PlanList(tasks: planProv.tasks);
-          },
+                if (planProvider.tasks.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.calendar_today,
+                          size: 64,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No plan generated yet',
+                          style: TextStyle(fontSize: 18),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Add courses and generate a plan',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                return _buildTaskList(context, planProvider.tasks);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTaskList(BuildContext context, List<StudyTask> tasks) {
+    final Map<DateTime, List<StudyTask>> groupedTasks = {};
+
+    for (final task in tasks) {
+      final date = DateTime(
+        task.dateTime.year,
+        task.dateTime.month,
+        task.dateTime.day,
+      );
+      groupedTasks.putIfAbsent(date, () => <StudyTask>[]).add(task);
+    }
+
+    final sortedDates = groupedTasks.keys.toList()..sort();
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: sortedDates.length,
+      itemBuilder: (context, index) {
+        final date = sortedDates[index];
+        final dateTasks = groupedTasks[date]!
+          ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                _formatDate(date),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ),
+            ...dateTasks.map((task) => _buildTaskCard(context, task)),
+            const SizedBox(height: 8),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTaskCard(BuildContext context, StudyTask task) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: _getDifficultyColor(task.difficulty),
+          child: const Icon(Icons.book, color: Colors.white, size: 20),
+        ),
+        title: Text(task.subject),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(task.task),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(
+                  Icons.access_time,
+                  size: 14,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '${task.dateTime.hour}:${task.dateTime.minute.toString().padLeft(2, '0')} • ${task.formattedDuration}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        trailing: Chip(
+          label: Text(
+            task.difficulty.displayName,
+            style: const TextStyle(fontSize: 11),
+          ),
+          backgroundColor: _getDifficultyColor(
+            task.difficulty,
+          ).withOpacity(0.2),
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+
+    if (date == today) return 'Today';
+    if (date == tomorrow) return 'Tomorrow';
+
+    final weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final weekday = weekdays[date.weekday - 1];
+    return '$weekday, ${date.day}/${date.month}/${date.year}';
+  }
+
+  Color _getDifficultyColor(Difficulty difficulty) {
+    switch (difficulty) {
+      case Difficulty.easy:
+        return Colors.green;
+      case Difficulty.medium:
+        return Colors.orange;
+      case Difficulty.hard:
+        return Colors.red;
+    }
+  }
+
+  void _showSaveDialog(BuildContext context) {
+    final controller = TextEditingController();
+
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save Plan'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'Notes (optional)',
+            hintText: 'e.g., Exam week plan',
+            border: OutlineInputBorder(),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              context.read<PlanProvider>().saveCurrentPlan(
+                notes: controller.text.trim().isEmpty
+                    ? null
+                    : controller.text.trim(),
+              );
+              Navigator.pop(context);
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('Plan saved!')));
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHistoryDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        child: SizedBox(
+          width: 420,
+          height: 520,
+          child: Column(
+            children: [
+              AppBar(
+                title: const Text('Plan History'),
+                automaticallyImplyLeading: false,
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              Expanded(
+                child: Consumer<PlanProvider>(
+                  builder: (context, planProvider, _) {
+                    if (planProvider.planHistory.isEmpty) {
+                      return const Center(child: Text('No saved plans'));
+                    }
+
+                    return ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: planProvider.planHistory.length,
+                      itemBuilder: (context, index) {
+                        final plan = planProvider.planHistory[index];
+
+                        return Card(
+                          child: ListTile(
+                            leading: Icon(_strategyIcon(plan.strategy)),
+                            title: Text(plan.strategy.displayName),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${plan.tasks.length} tasks'),
+                                Text(plan.formattedDate),
+                                if (plan.notes != null) Text(plan.notes!),
+                              ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.upload),
+                                  tooltip: 'Load',
+                                  onPressed: () {
+                                    planProvider.loadPlan(plan);
+                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Plan loaded!'),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete),
+                                  tooltip: 'Delete',
+                                  onPressed: () {
+                                    planProvider.deletePlanFromHistory(plan.id);
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -68,115 +458,5 @@ class PlanScreen extends StatelessWidget {
       case Strategy.randomMix:
         return Icons.shuffle;
     }
-  }
-}
-
-class _EmptyPlan extends StatelessWidget {
-  final VoidCallback onGenerate;
-  const _EmptyPlan({required this.onGenerate});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.view_agenda_outlined, size: 64),
-            const SizedBox(height: 12),
-            Text('No plan yet', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            const Text(
-              'Generate a plan from Courses, or tap Generate here (mock).',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: onGenerate,
-              icon: const Icon(Icons.auto_awesome),
-              label: const Text('Generate (mock)'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PlanList extends StatelessWidget {
-  final List<StudyTask> tasks;
-  const _PlanList({required this.tasks});
-
-  @override
-  Widget build(BuildContext context) {
-    final grouped = _groupByDay(tasks);
-    final days = grouped.keys.toList()..sort();
-
-    final dayFmt = DateFormat('EEEE, MMM d');
-    final timeFmt = DateFormat('HH:mm');
-
-    return ListView.builder(
-      // I used a builder function here because it makes the performance better by building the items lazily
-      padding: const EdgeInsets.all(16),
-      itemCount: days.length,
-      itemBuilder: (context, index) {
-        final day = days[index];
-        final dayTasks = grouped[day]!
-          ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                dayFmt.format(day),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-
-              const SizedBox(height: 10),
-
-              ...dayTasks.map((t) {
-                final start = t.dateTime;
-                final end = start.add(
-                  Duration(minutes: (t.durationHours * 60).round()),
-                );
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.schedule),
-                      title: Text(
-                        '${timeFmt.format(start)}–${timeFmt.format(end)}  •  ${t.subject}',
-                      ),
-                      subtitle: Text(t.task),
-                      trailing: Chip(
-                        label: Text(_difficultyLabel(t.difficulty)),
-                      ),
-                      onTap: null,
-                    ),
-                  ),
-                );
-              }),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Map<DateTime, List<StudyTask>> _groupByDay(List<StudyTask> tasks) {
-    final map = <DateTime, List<StudyTask>>{};
-    for (final t in tasks) {
-      final d = DateTime(t.dateTime.year, t.dateTime.month, t.dateTime.day);
-      map.putIfAbsent(d, () => []).add(t);
-    }
-    return map;
-  }
-
-  String _difficultyLabel(dynamic difficulty) {
-    final name = difficulty.toString().split('.').last;
-    return name[0].toUpperCase() + name.substring(1);
   }
 }
