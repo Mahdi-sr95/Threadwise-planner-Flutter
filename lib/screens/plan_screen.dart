@@ -5,10 +5,31 @@ import '../models/enums.dart';
 import '../models/study_task.dart';
 import '../state/courses_provider.dart';
 import '../state/plan_provider.dart';
+import 'package:go_router/go_router.dart';
 
 /// Displays the generated plan, allows strategy selection, saving and loading history.
 class PlanScreen extends StatelessWidget {
   const PlanScreen({super.key});
+
+  void _openEditCourseFromTask(BuildContext context, StudyTask task) {
+    final coursesProv = context.read<CoursesProvider>();
+
+    final matches = coursesProv.courses
+        .where((c) => c.name.trim() == task.subject.trim())
+        .toList();
+
+    if (matches.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Course not found for "${task.subject}"')),
+      );
+      return;
+    }
+
+    final course = matches.first;
+
+    // pass from=plan so EditCourseScreen returns to /plan
+    context.go('/courses/${course.id}/edit?from=plan');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -135,6 +156,17 @@ class PlanScreen extends StatelessWidget {
                     );
                   },
                 ),
+                Consumer<PlanProvider>(
+                  builder: (context, planProvider, _) {
+                    return IconButton.filledTonal(
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: planProvider.tasks.isEmpty
+                          ? null
+                          : planProvider.clearPlan,
+                      tooltip: 'Clear Plan',
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -258,6 +290,7 @@ class PlanScreen extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
+        onTap: () => _openEditCourseFromTask(context, task),
         leading: CircleAvatar(
           backgroundColor: _getDifficultyColor(task.difficulty),
           child: const Icon(Icons.book, color: Colors.white, size: 20),

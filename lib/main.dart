@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'app_shell.dart';
 import 'screens/courses_screen.dart';
 import 'screens/add_course_screen.dart';
+import 'screens/edit_course_screen.dart';
 import 'screens/plan_screen.dart';
 import 'screens/settings_screen.dart';
 
@@ -35,11 +36,11 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
     _initializeProviders();
   }
 
-  /// Initialize all providers with local storage
+  /// Initialize providers with local storage
   Future<void> _initializeProviders() async {
     _coursesProvider = CoursesProvider();
     await _coursesProvider.init();
-    
+
     setState(() {
       _initialized = true;
     });
@@ -49,11 +50,7 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
   Widget build(BuildContext context) {
     if (!_initialized) {
       return const MaterialApp(
-        home: Scaffold(
-          body: Center(
-            child: CircularProgressIndicator(),
-          ),
-        ),
+        home: Scaffold(body: Center(child: CircularProgressIndicator())),
       );
     }
 
@@ -70,6 +67,15 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
                 GoRoute(
                   path: 'add',
                   builder: (context, state) => const AddCourseScreen(),
+                ),
+                // ✅ FIX: edit is nested under /courses
+                GoRoute(
+                  path: ':id/edit',
+                  builder: (context, state) {
+                    final id = state.pathParameters['id']!;
+                    final from = state.uri.queryParameters['from']; // "plan"
+                    return EditCourseScreen(courseId: id, from: from);
+                  },
                 ),
               ],
             ),
@@ -95,10 +101,7 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
       child: MaterialApp.router(
         title: 'ThreadWise Planner',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorSchemeSeed: Colors.indigo,
-        ),
+        theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
         darkTheme: ThemeData(
           useMaterial3: true,
           brightness: Brightness.dark,
