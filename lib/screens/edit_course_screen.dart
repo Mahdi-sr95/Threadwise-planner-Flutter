@@ -6,22 +6,29 @@ import 'package:provider/provider.dart';
 import '../models/course.dart';
 import '../models/enums.dart';
 import '../state/courses_provider.dart';
+import '../state/plan_provider.dart';
 
-/// Screen for adding a new course with name, deadline, difficulty, and study hours
-class AddCourseScreen extends StatefulWidget {
-  const AddCourseScreen({super.key});
+class EditCourseScreen extends StatefulWidget {
+  final String courseId;
+
+  /// If opened from plan screen, pass from="plan" so we can return there.
+  final String? from;
+
+  const EditCourseScreen({super.key, required this.courseId, this.from});
 
   @override
-  State<AddCourseScreen> createState() => _AddCourseScreenState();
+  State<EditCourseScreen> createState() => _EditCourseScreenState();
 }
 
-class _AddCourseScreenState extends State<AddCourseScreen> {
+class _EditCourseScreenState extends State<EditCourseScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _studyHoursCtrl = TextEditingController();
 
   DateTime? _deadline;
   Difficulty _difficulty = Difficulty.medium;
+
+  bool _loadedOnce = false;
 
   @override
   void dispose() {
@@ -30,32 +37,47 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     super.dispose();
   }
 
-  /// Show date picker dialog for deadline selection
+  void _prefill(Course c) {
+    _nameCtrl.text = c.name;
+    _studyHoursCtrl.text = c.studyHours.toString();
+    _deadline = DateTime(c.deadline.year, c.deadline.month, c.deadline.day);
+    _difficulty = c.difficulty;
+    _loadedOnce = true;
+  }
+
   Future<void> _pickDeadline() async {
     final now = DateTime.now();
+    final initial = _deadline ?? now.add(const Duration(days: 7));
+
     final picked = await showDatePicker(
       context: context,
       firstDate: DateTime(now.year, now.month, now.day),
       lastDate: DateTime(now.year + 5),
-      initialDate: _deadline ?? now.add(const Duration(days: 7)),
+      initialDate: initial,
     );
 
     if (picked != null) {
-      setState(
-        () => _deadline = DateTime(picked.year, picked.month, picked.day),
-      );
+      setState(() {
+        _deadline = DateTime(picked.year, picked.month, picked.day);
+      });
     }
   }
 
-  /// Format date as YYYY-MM-DD
   String _formatDate(DateTime d) {
     final mm = d.month.toString().padLeft(2, '0');
     final dd = d.day.toString().padLeft(2, '0');
     return '${d.year}-$mm-$dd';
   }
 
-  /// Validate and save the course
-  void _save() {
+  void _goBack() {
+    if (widget.from == 'plan') {
+      context.go('/plan');
+    } else {
+      context.go('/courses');
+    }
+  }
+
+  Future<void> _save(Course original) async {
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
 
@@ -66,72 +88,84 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       return;
     }
 
-    final course = Course(
+    final updated = original.copyWith(
       name: _nameCtrl.text.trim(),
       deadline: _deadline!,
       difficulty: _difficulty,
       studyHours: double.parse(_studyHoursCtrl.text.trim()),
     );
 
-    context.read<CoursesProvider>().addCourse(course);
+    //Update the course
+    await context.read<CoursesProvider>().updateCourse(updated);
 
-    // Navigate back to courses list
-    context.go('/courses');
+    // Regenerate the plan if the initial page was plan
+    if (widget.from == 'plan') {
+      final courses = context.read<CoursesProvider>().courses;
+      await context.read<PlanProvider>().generatePlan(courses);
+    }
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Course updated')));
+
+    _goBack();
   }
 
   @override
   Widget build(BuildContext context) {
+    final coursesProv = context.watch<CoursesProvider>();
+    final course = coursesProv.getById(widget.courseId);
+
+    if (course == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Edit Course')),
+        body: const Center(child: Text('Course not found')),
+      );
+    }
+
+    if (!_loadedOnce) {
+      _prefill(course);
+    }
+
     final deadlineText = _deadline == null
         ? 'Pick a date'
         : _formatDate(_deadline!);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Add Course')),
+      appBar: AppBar(
+        title: const Text('Edit Course'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _goBack,
+        ),
+      ),
       body: SafeArea(
         child: Form(
           key: _formKey,
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              Text(
-                'Course details',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Enter the course info, then save.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-
-              // Course name input field
               TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Course name',
-                  hintText: 'e.g., Mobile Application Development',
                   border: OutlineInputBorder(),
                 ),
-                textInputAction: TextInputAction.next,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) {
+                  if (v == null || v.trim().isEmpty)
                     return 'Course name is required';
-                  }
-                  if (v.trim().length < 2) {
-                    return 'Too short';
-                  }
+                  if (v.trim().length < 2) return 'Too short';
                   return null;
                 },
               ),
-
               const SizedBox(height: 12),
 
-              // Study hours input field
               TextFormField(
                 controller: _studyHoursCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Study hours needed',
-                  hintText: 'e.g., 15',
                   border: OutlineInputBorder(),
                   suffixText: 'hours',
                 ),
@@ -141,25 +175,18 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}')),
                 ],
-                textInputAction: TextInputAction.next,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) {
+                  if (v == null || v.trim().isEmpty)
                     return 'Study hours required';
-                  }
                   final num = double.tryParse(v.trim());
-                  if (num == null || num <= 0) {
+                  if (num == null || num <= 0)
                     return 'Enter a valid positive number';
-                  }
-                  if (num > 200) {
-                    return 'Too many hours (max 200)';
-                  }
+                  if (num > 200) return 'Too many hours (max 200)';
                   return null;
                 },
               ),
-
               const SizedBox(height: 12),
 
-              // Deadline picker button
               InkWell(
                 onTap: _pickDeadline,
                 borderRadius: BorderRadius.circular(12),
@@ -174,21 +201,18 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
               ),
               const SizedBox(height: 12),
 
-              // Difficulty dropdown selector
               DropdownButtonFormField<Difficulty>(
-                initialValue: _difficulty,
+                value: _difficulty,
                 items: Difficulty.values
                     .map(
                       (d) => DropdownMenuItem(
                         value: d,
-                        child: Text(
-                          d.name[0].toUpperCase() + d.name.substring(1),
-                        ),
+                        child: Text(d.displayName),
                       ),
                     )
                     .toList(),
                 onChanged: (v) =>
-                    setState(() => _difficulty = v ?? Difficulty.medium),
+                    setState(() => _difficulty = v ?? _difficulty),
                 decoration: const InputDecoration(
                   labelText: 'Difficulty',
                   border: OutlineInputBorder(),
@@ -197,21 +221,19 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
               const SizedBox(height: 20),
 
-              // Save button
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: _save,
-                  child: const Text('Save'),
+                  onPressed: () => _save(course),
+                  child: const Text('Save changes'),
                 ),
               ),
               const SizedBox(height: 8),
 
-              // Cancel button
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
-                  onPressed: () => context.pop(),
+                  onPressed: _goBack,
                   child: const Text('Cancel'),
                 ),
               ),
