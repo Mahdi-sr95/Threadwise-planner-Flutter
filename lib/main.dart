@@ -11,6 +11,7 @@ import 'screens/settings_screen.dart';
 import 'state/courses_provider.dart';
 import 'state/plan_provider.dart';
 import 'state/settings_provider.dart';
+import 'screens/calendar_screen.dart';
 
 /// Main entry point - Initializes local storage and runs the app
 void main() async {
@@ -39,7 +40,7 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
   Future<void> _initializeProviders() async {
     _coursesProvider = CoursesProvider();
     await _coursesProvider.init();
-    
+
     setState(() {
       _initialized = true;
     });
@@ -49,11 +50,7 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
   Widget build(BuildContext context) {
     if (!_initialized) {
       return const MaterialApp(
-        home: Scaffold(
-          body: Center(
-            child: CircularProgressIndicator(),
-          ),
-        ),
+        home: Scaffold(body: Center(child: CircularProgressIndicator())),
       );
     }
 
@@ -81,6 +78,10 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
               path: '/settings',
               builder: (context, state) => const SettingsScreen(),
             ),
+            GoRoute(
+              path: '/calendar',
+              builder: (context, state) => const CalendarScreen(),
+            ),
           ],
         ),
       ],
@@ -95,10 +96,7 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
       child: MaterialApp.router(
         title: 'ThreadWise Planner',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          colorSchemeSeed: Colors.indigo,
-        ),
+        theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
         darkTheme: ThemeData(
           useMaterial3: true,
           brightness: Brightness.dark,
