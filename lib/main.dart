@@ -12,6 +12,7 @@ import 'screens/settings_screen.dart';
 import 'state/courses_provider.dart';
 import 'state/plan_provider.dart';
 import 'state/settings_provider.dart';
+import 'screens/calendar_screen.dart';
 
 import 'state/saved_courses_provider.dart';
 import 'screens/saved_courses_screen.dart';
@@ -46,9 +47,6 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
     await _coursesProvider.init();
 
     _savedCoursesProvider = SavedCoursesProvider();
-    await _savedCoursesProvider.init();
-
-    setState(() => _initialized = true);
   }
 
   @override
@@ -92,8 +90,8 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
               builder: (context, state) => const SettingsScreen(),
             ),
             GoRoute(
-              path: '/saved-courses',
-              builder: (context, state) => const SavedCoursesScreen(),
+              path: '/calendar',
+              builder: (context, state) => const CalendarScreen(),
             ),
           ],
         ),

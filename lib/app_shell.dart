@@ -6,8 +6,11 @@ class AppShell extends StatelessWidget {
   const AppShell({super.key, required this.child});
 
   int _indexFromLocation(String location) {
+    if (location.startsWith('/courses')) return 0;
     if (location.startsWith('/plan')) return 1;
-    if (location.startsWith('/settings')) return 2;
+    if (location.startsWith('/calendar')) return 2;
+    if (location.startsWith('/settings')) return 3;
+
     return 0; //courses
   }
 
@@ -28,6 +31,9 @@ class AppShell extends StatelessWidget {
               context.go('/plan');
               break;
             case 2:
+              context.go('/calendar');
+              break;
+            case 3:
               context.go('/settings');
               break;
           }
@@ -35,6 +41,10 @@ class AppShell extends StatelessWidget {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.school), label: 'Courses'),
           NavigationDestination(icon: Icon(Icons.view_agenda), label: 'Plan'),
+          NavigationDestination(
+            icon: Icon(Icons.calendar_month),
+            label: 'Calendar',
+          ),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
