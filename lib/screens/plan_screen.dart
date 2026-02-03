@@ -8,6 +8,7 @@ import '../models/study_task.dart';
 import '../state/courses_provider.dart';
 import '../state/plan_provider.dart';
 import 'package:go_router/go_router.dart';
+import '../services/csv_export_service.dart';
 
 /// Displays the generated plan, allows strategy selection, saving and loading history.
 class PlanScreen extends StatelessWidget {
@@ -32,6 +33,8 @@ class PlanScreen extends StatelessWidget {
     // pass from=plan so EditCourseScreen returns to /plan
     context.go('/courses/${course.id}/edit?from=plan');
   }
+
+  static final CsvExportService _csvExporter = CsvExportService();
 
   @override
   Widget build(BuildContext context) {
@@ -166,6 +169,31 @@ class PlanScreen extends StatelessWidget {
                           ? null
                           : planProvider.clearPlan,
                       tooltip: 'Clear Plan',
+                    );
+                  },
+                ),
+                Consumer<PlanProvider>(
+                  builder: (context, planProvider, _) {
+                    return IconButton.filledTonal(
+                      icon: const Icon(Icons.download),
+                      tooltip: 'Export CSV',
+                      onPressed: planProvider.tasks.isEmpty
+                          ? null
+                          : () async {
+                              try {
+                                await _csvExporter.export(
+                                  tasks: planProvider.tasks,
+                                );
+                                ;
+                              } catch (e) {
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('CSV export failed: $e'),
+                                  ),
+                                );
+                              }
+                            },
                     );
                   },
                 ),

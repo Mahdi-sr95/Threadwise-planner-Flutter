@@ -18,12 +18,17 @@ dependencies:
 
   # iOS-style icons
   cupertino_icons: ^1.0.8
-  
+
   # HTTP client for API calls
   http: ^1.6.0
-  
+
   # Local storage with SharedPreferences
   shared_preferences: ^2.2.2
+
+  # CSV export
+  csv: ^6.0.0
+  path_provider: ^2.1.5
+  share_plus: ^10.1.4
 
 dev_dependencies:
   flutter_test:
