@@ -25,6 +25,7 @@ dependencies:
   # Local storage with SharedPreferences
   shared_preferences: ^2.2.2
 
+  table_calendar: ^3.2.0
   # CSV export
   csv: ^6.0.0
   path_provider: ^2.1.5

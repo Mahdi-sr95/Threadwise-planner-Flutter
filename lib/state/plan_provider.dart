@@ -44,6 +44,20 @@ class PlanProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  DateTime _selectedDay = DateTime.now();
+  DateTime get selectedDay =>
+      DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
+
+  void setSelectedDay(DateTime day) {
+    final d = DateTime(day.year, day.month, day.day);
+    if (_selectedDay.year == d.year &&
+        _selectedDay.month == d.month &&
+        _selectedDay.day == d.day)
+      return;
+    _selectedDay = d;
+    notifyListeners();
+  }
+
   /// Generates a new plan based on the current strategy.
   /// The optional settings argument is kept for compatibility with existing callers.
   Future<void> generatePlan(List<Course> courses, [dynamic settings]) async {
@@ -93,6 +107,17 @@ class PlanProvider extends ChangeNotifier {
   void loadPlan(SavedPlan plan) {
     _strategy = plan.strategy;
     _tasks = List<StudyTask>.from(plan.tasks);
+    if (_tasks.isNotEmpty) {
+      final first =
+          _tasks
+              .map(
+                (t) =>
+                    DateTime(t.dateTime.year, t.dateTime.month, t.dateTime.day),
+              )
+              .toList()
+            ..sort();
+      _selectedDay = first.first;
+    }
     notifyListeners();
   }
 
@@ -140,6 +165,8 @@ class PlanProvider extends ChangeNotifier {
   void clearPlan() {
     _tasks = <StudyTask>[];
     _error = null;
+    _selectedDay = DateTime.now();
+
     notifyListeners();
   }
 }
