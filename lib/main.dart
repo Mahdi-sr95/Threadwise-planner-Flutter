@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'app_shell.dart';
 import 'screens/courses_screen.dart';
 import 'screens/add_course_screen.dart';
+import 'screens/edit_course_screen.dart';
 import 'screens/plan_screen.dart';
 import 'screens/settings_screen.dart';
 
@@ -13,6 +14,9 @@ import 'state/plan_provider.dart';
 import 'state/settings_provider.dart';
 import 'screens/calendar_screen.dart';
 import 'screens/calendar_month_screen.dart';
+
+import 'state/saved_courses_provider.dart';
+import 'screens/saved_courses_screen.dart';
 
 /// Main entry point - Initializes local storage and runs the app
 void main() async {
@@ -29,6 +33,8 @@ class ThreadWiseApp extends StatefulWidget {
 
 class _ThreadWiseAppState extends State<ThreadWiseApp> {
   late final CoursesProvider _coursesProvider;
+
+  late final SavedCoursesProvider _savedCoursesProvider;
   bool _initialized = false;
 
   @override
@@ -37,7 +43,6 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
     _initializeProviders();
   }
 
-  /// Initialize all providers with local storage
   Future<void> _initializeProviders() async {
     _coursesProvider = CoursesProvider();
     await _coursesProvider.init();
@@ -45,6 +50,10 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
     setState(() {
       _initialized = true;
     });
+    _savedCoursesProvider = SavedCoursesProvider();
+    await _savedCoursesProvider.init();
+
+    setState(() => _initialized = true);
   }
 
   @override
@@ -69,6 +78,14 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
                   path: 'add',
                   builder: (context, state) => const AddCourseScreen(),
                 ),
+                GoRoute(
+                  path: ':id/edit',
+                  builder: (context, state) {
+                    final id = state.pathParameters['id']!;
+                    final from = state.uri.queryParameters['from']; //"plan"
+                    return EditCourseScreen(courseId: id, from: from);
+                  },
+                ),
               ],
             ),
             GoRoute(
@@ -87,6 +104,8 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
             GoRoute(
               path: '/calendar/month',
               builder: (context, state) => const CalendarMonthScreen(),
+              path: '/saved-courses',
+              builder: (context, state) => const SavedCoursesScreen(),
             ),
           ],
         ),
@@ -98,6 +117,7 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
         ChangeNotifierProvider.value(value: _coursesProvider),
         ChangeNotifierProvider(create: (_) => PlanProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
+        ChangeNotifierProvider.value(value: _savedCoursesProvider),
       ],
       child: MaterialApp.router(
         title: 'ThreadWise Planner',
