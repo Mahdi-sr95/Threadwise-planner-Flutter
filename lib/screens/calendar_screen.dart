@@ -1,5 +1,5 @@
+// lib/screens/calendar_screen.dart
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
 
@@ -15,8 +15,11 @@ class CalendarScreen extends StatefulWidget {
 }
 
 class _CalendarScreenState extends State<CalendarScreen> {
+  DateTime _focusedDay = _dayOnly(DateTime.now());
+  DateTime _selectedDay = _dayOnly(DateTime.now());
+
   final PageController _pageController = PageController(viewportFraction: 0.92);
-  int? _pendingJump;
+  bool _didInitialJump = false;
 
   @override
   void dispose() {
@@ -24,36 +27,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
     super.dispose();
   }
 
-  DateTime _dayOnly(DateTime d) => DateTime(d.year, d.month, d.day);
-
-  Map<DateTime, List<StudyTask>> _groupByDay(List<StudyTask> tasks) {
-    final map = <DateTime, List<StudyTask>>{};
-    for (final t in tasks) {
-      final d = _dayOnly(t.dateTime);
-      map.putIfAbsent(d, () => <StudyTask>[]).add(t);
-    }
-    return map;
-  }
-
-  List<DateTime> _buildContinuousDays(DateTime start, DateTime end) {
-    final s = _dayOnly(start);
-    final e = _dayOnly(end);
-
-    final out = <DateTime>[];
-    for (var d = s; !d.isAfter(e); d = d.add(const Duration(days: 1))) {
-      out.add(d);
-    }
-    return out;
-  }
-
-  void _jumpToPageOnce(int index) {
-    if (_pendingJump == index) return;
-    _pendingJump = index;
+  void _jumpToIndexOnce(int index) {
+    if (_didInitialJump) return;
+    _didInitialJump = true;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (_pageController.hasClients) _pageController.jumpToPage(index);
-      _pendingJump = null;
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(index);
+      }
     });
   }
 
@@ -61,97 +43,80 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget build(BuildContext context) {
     final planProv = context.watch<PlanProvider>();
 
-    if (planProv.tasks.isEmpty) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Calendar'),
-          actions: [
-            IconButton(
-              tooltip: 'Month view',
-              icon: const Icon(Icons.calendar_month),
-              onPressed: () => context.go('/calendar/month'),
-            ),
-          ],
-        ),
-        body: const Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'No plan loaded yet.\nGenerate a plan or load a saved plan.',
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ),
-      );
-    }
-
     final grouped = _groupByDay(planProv.tasks);
     final taskDays = grouped.keys.toList()..sort();
-    final days = _buildContinuousDays(taskDays.first, taskDays.last);
 
-    final selected = planProv.selectedDay;
-    final clampedSelected = selected.isBefore(days.first)
-        ? days.first
-        : (selected.isAfter(days.last) ? days.last : selected);
-
-    // keep provider synced if it drifted out of range
-    if (clampedSelected != selected) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted)
-          context.read<PlanProvider>().setSelectedDay(clampedSelected);
-      });
+    // Range logic: if plan exists -> use plan range, else show a reasonable placeholder range
+    final DateTime rangeStart;
+    final DateTime rangeEnd;
+    if (taskDays.isNotEmpty) {
+      rangeStart = _dayOnly(taskDays.first);
+      rangeEnd = _dayOnly(taskDays.last);
+    } else {
+      final today = _dayOnly(DateTime.now());
+      rangeStart = today.subtract(const Duration(days: 7));
+      rangeEnd = today.add(const Duration(days: 21));
     }
 
-    final idx = days.indexOf(clampedSelected).clamp(0, days.length - 1);
-    _jumpToPageOnce(idx);
+    final days = _buildContinuousDays(rangeStart, rangeEnd);
+
+    // Clamp selected day into range (do NOT force to a task day)
+    final selected = _dayOnly(_selectedDay);
+    DateTime initialDay = selected;
+    if (initialDay.isBefore(rangeStart)) initialDay = rangeStart;
+    if (initialDay.isAfter(rangeEnd)) initialDay = rangeEnd;
+
+    _selectedDay = initialDay;
+    _focusedDay = initialDay;
+
+    final initialIndex = days
+        .indexOf(_dayOnly(initialDay))
+        .clamp(0, days.length - 1);
+    _jumpToIndexOnce(initialIndex);
+
+    final hasRealPlan = planProv.tasks.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Calendar'),
         actions: [
-          IconButton(
-            tooltip: 'Month view',
-            icon: const Icon(Icons.calendar_month),
-            onPressed: () => context.go('/calendar/month'),
-          ),
-          IconButton(
-            tooltip: 'Saved plans',
-            icon: const Icon(Icons.history),
-            onPressed: () => _showHistoryDialog(context),
-          ),
+          _historyButton(context),
           IconButton(
             tooltip: 'Clear plan',
             icon: const Icon(Icons.delete_outline),
-            onPressed: planProv.clearPlan,
+            onPressed: planProv.tasks.isEmpty ? null : planProv.clearPlan,
           ),
         ],
       ),
       body: SafeArea(
         child: Column(
           children: [
+            // Week strip
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
               child: Card(
                 child: Padding(
                   padding: const EdgeInsets.all(8),
                   child: TableCalendar(
-                    firstDay: days.first,
-                    lastDay: days.last,
-                    focusedDay: clampedSelected,
+                    firstDay: rangeStart,
+                    lastDay: rangeEnd,
+                    focusedDay: _focusedDay,
                     calendarFormat: CalendarFormat.week,
                     headerStyle: const HeaderStyle(
-                      formatButtonVisible: false, // ✅ no toggle button
+                      formatButtonVisible: false,
                       titleCentered: true,
                     ),
-                    selectedDayPredicate: (d) => isSameDay(d, clampedSelected),
+                    selectedDayPredicate: (day) => isSameDay(day, _selectedDay),
                     onDaySelected: (selectedDay, focusedDay) {
-                      final s = _dayOnly(selectedDay);
-                      context.read<PlanProvider>().setSelectedDay(s);
+                      setState(() {
+                        _selectedDay = _dayOnly(selectedDay);
+                        _focusedDay = _dayOnly(focusedDay);
+                      });
 
-                      final newIdx = days.indexOf(s);
-                      if (newIdx >= 0) {
+                      final idx = days.indexOf(_dayOnly(selectedDay));
+                      if (idx >= 0 && _pageController.hasClients) {
                         _pageController.animateToPage(
-                          newIdx,
+                          idx,
                           duration: const Duration(milliseconds: 250),
                           curve: Curves.easeOut,
                         );
@@ -163,17 +128,35 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 ),
               ),
             ),
+
+            if (!hasRealPlan)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Text(
+                  'No plan loaded yet. This is a placeholder date range.\nGenerate a plan to see real tasks here.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+
+            const SizedBox(height: 8),
+
+            // horizontal swipe: one page per day
             Expanded(
               child: PageView.builder(
                 controller: _pageController,
                 itemCount: days.length,
                 onPageChanged: (index) {
-                  context.read<PlanProvider>().setSelectedDay(days[index]);
+                  final newDay = days[index];
+                  setState(() {
+                    _selectedDay = newDay;
+                    _focusedDay = newDay;
+                  });
                 },
                 itemBuilder: (context, index) {
                   final day = days[index];
                   final dayTasks = (grouped[day] ?? <StudyTask>[])
                     ..sort((a, b) => a.dateTime.compareTo(b.dateTime));
+
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: _DayCard(day: day, tasks: dayTasks),
@@ -184,6 +167,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _historyButton(BuildContext context) {
+    return Consumer<PlanProvider>(
+      builder: (context, planProvider, _) {
+        return IconButton(
+          icon: Badge(
+            label: Text('${planProvider.planHistory.length}'),
+            isLabelVisible: planProvider.planHistory.isNotEmpty,
+            child: const Icon(Icons.history),
+          ),
+          tooltip: 'Saved plans',
+          onPressed: () => _showHistoryDialog(context),
+        );
+      },
     );
   }
 
@@ -218,12 +217,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       itemCount: planProvider.planHistory.length,
                       itemBuilder: (context, index) {
                         final plan = planProvider.planHistory[index];
+
                         return Card(
                           child: ListTile(
                             leading: Icon(_strategyIcon(plan.strategy)),
                             title: Text(plan.strategy.displayName),
-                            subtitle: Text(
-                              '${plan.tasks.length} tasks • ${plan.formattedDate}',
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${plan.tasks.length} tasks'),
+                                Text(plan.formattedDate),
+                                if (plan.notes != null) Text(plan.notes!),
+                              ],
                             ),
                             trailing: IconButton(
                               icon: const Icon(Icons.upload),
@@ -231,6 +236,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
                               onPressed: () {
                                 planProvider.loadPlan(plan);
                                 Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Plan loaded!')),
+                                );
+
+                                // allow re-jump to correct day range after loading
+                                setState(() {
+                                  _didInitialJump = false;
+                                  _selectedDay = _dayOnly(DateTime.now());
+                                  _focusedDay = _dayOnly(DateTime.now());
+                                });
                               },
                             ),
                           ),
@@ -259,6 +274,27 @@ class _CalendarScreenState extends State<CalendarScreen> {
         return Icons.shuffle;
     }
   }
+}
+
+Map<DateTime, List<StudyTask>> _groupByDay(List<StudyTask> tasks) {
+  final map = <DateTime, List<StudyTask>>{};
+  for (final t in tasks) {
+    final d = _dayOnly(t.dateTime);
+    map.putIfAbsent(d, () => <StudyTask>[]).add(t);
+  }
+  return map;
+}
+
+DateTime _dayOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+List<DateTime> _buildContinuousDays(DateTime start, DateTime end) {
+  final s = _dayOnly(start);
+  final e = _dayOnly(end);
+  final out = <DateTime>[];
+  for (var d = s; !d.isAfter(e); d = d.add(const Duration(days: 1))) {
+    out.add(d);
+  }
+  return out;
 }
 
 class _DayCard extends StatelessWidget {
