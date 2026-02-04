@@ -13,6 +13,7 @@ import 'state/courses_provider.dart';
 import 'state/plan_provider.dart';
 import 'state/settings_provider.dart';
 import 'screens/calendar_screen.dart';
+import 'screens/calendar_month_screen.dart';
 
 import 'state/saved_courses_provider.dart';
 import 'screens/saved_courses_screen.dart';
@@ -92,6 +93,11 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
             GoRoute(
               path: '/calendar',
               builder: (context, state) => const CalendarScreen(),
+            ),
+
+            GoRoute(
+              path: '/calendar/month',
+              builder: (context, state) => const CalendarMonthScreen(),
             ),
           ],
         ),

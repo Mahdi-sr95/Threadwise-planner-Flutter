@@ -25,11 +25,7 @@ dependencies:
   # Local storage with SharedPreferences
   shared_preferences: ^2.2.2
 
-  # CSV export
-  csv: ^6.0.0
-  path_provider: ^2.1.5
-  share_plus: ^10.1.4
-  device_calendar: ^4.3.3
+   8f919b4 (Initial calendar)
 
 dev_dependencies:
   flutter_test:
