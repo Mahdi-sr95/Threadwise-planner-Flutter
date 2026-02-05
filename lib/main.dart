@@ -104,6 +104,8 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
             GoRoute(
               path: '/calendar/month',
               builder: (context, state) => const CalendarMonthScreen(),
+            ),
+            GoRoute(
               path: '/saved-courses',
               builder: (context, state) => const SavedCoursesScreen(),
             ),

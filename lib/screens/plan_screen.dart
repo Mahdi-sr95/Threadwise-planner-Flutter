@@ -181,8 +181,8 @@ class PlanScreen extends StatelessWidget {
                           ? null
                           : () async {
                               try {
-                                await _csvExporter.export(
-                                  tasks: planProvider.tasks,
+                                await _csvExporter.exportCsv(
+                                  planProvider.tasks,
                                 );
                                 ;
                               } catch (e) {
