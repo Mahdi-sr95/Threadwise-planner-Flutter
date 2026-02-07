@@ -1,3 +1,4 @@
+﻿
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -181,10 +182,9 @@ class PlanScreen extends StatelessWidget {
                           ? null
                           : () async {
                               try {
-                                await _csvExporter.export(
-                                  tasks: planProvider.tasks,
+                                await _csvExporter.exportCsv(
+                                  planProvider.tasks,
                                 );
-                                ;
                               } catch (e) {
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -357,7 +357,7 @@ class PlanScreen extends StatelessWidget {
           ),
           backgroundColor: _getDifficultyColor(
             task.difficulty,
-          ).withOpacity(0.2),
+          ).withValues(alpha: 0.2),
         ),
       ),
     );
@@ -530,3 +530,6 @@ class PlanScreen extends StatelessWidget {
     }
   }
 }
+
+
+

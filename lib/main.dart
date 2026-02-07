@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -47,7 +47,13 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
     _coursesProvider = CoursesProvider();
     await _coursesProvider.init();
 
+    setState(() {
+      _initialized = true;
+    });
     _savedCoursesProvider = SavedCoursesProvider();
+    await _savedCoursesProvider.init();
+
+    setState(() => _initialized = true);
   }
 
   @override
@@ -98,6 +104,10 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
             GoRoute(
               path: '/calendar/month',
               builder: (context, state) => const CalendarMonthScreen(),
+            ),
+            GoRoute(
+              path: '/saved-courses',
+              builder: (context, state) => const SavedCoursesScreen(),
             ),
           ],
         ),

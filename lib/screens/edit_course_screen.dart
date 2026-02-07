@@ -202,7 +202,7 @@ class _EditCourseScreenState extends State<EditCourseScreen> {
               const SizedBox(height: 12),
 
               DropdownButtonFormField<Difficulty>(
-                value: _difficulty,
+                initialValue: _difficulty,
                 items: Difficulty.values
                     .map(
                       (d) => DropdownMenuItem(
