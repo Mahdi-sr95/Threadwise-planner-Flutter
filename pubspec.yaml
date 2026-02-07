@@ -1,4 +1,4 @@
-name: threadwise_planner
+﻿name: threadwise_planner
 description: "A new Flutter project."
 publish_to: "none"
 
@@ -25,7 +25,14 @@ dependencies:
   # Local storage with SharedPreferences
   shared_preferences: ^2.2.2
 
-   8f919b4 (Initial calendar)
+  # CSV export + share
+  csv: ^6.0.0
+  path_provider: ^2.1.5
+  share_plus: ^10.1.4
+
+  # Calendar integration
+  device_calendar: ^4.3.3
+  table_calendar: ^3.1.2
 
 dev_dependencies:
   flutter_test:
