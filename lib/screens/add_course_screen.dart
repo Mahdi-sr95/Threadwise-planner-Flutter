@@ -6,8 +6,10 @@ import 'package:provider/provider.dart';
 import '../models/course.dart';
 import '../models/enums.dart';
 import '../state/courses_provider.dart';
+import '../state/semesters_provider.dart';
 
-/// Screen for adding a new course with name, deadline, difficulty, and study hours
+/// Screen for adding a new course with name, deadline, difficulty, study hours,
+/// and (NEW) selecting which semester it belongs to.
 class AddCourseScreen extends StatefulWidget {
   const AddCourseScreen({super.key});
 
@@ -23,6 +25,9 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
   DateTime? _deadline;
   Difficulty _difficulty = Difficulty.medium;
 
+  String? _selectedSemesterId;
+  bool _semesterInitDone = false;
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -30,7 +35,23 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     super.dispose();
   }
 
-  /// Show date picker dialog for deadline selection
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    // Set default semester once (selected semester if any, else first semester if exists)
+    if (!_semesterInitDone) {
+      final semProv = context.read<SemestersProvider>();
+      final selected = semProv.selectedSemester;
+      if (selected != null) {
+        _selectedSemesterId = selected.id;
+      } else if (semProv.semesters.isNotEmpty) {
+        _selectedSemesterId = semProv.semesters.first.id;
+      }
+      _semesterInitDone = true;
+    }
+  }
+
   Future<void> _pickDeadline() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -47,14 +68,12 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     }
   }
 
-  /// Format date as YYYY-MM-DD
   String _formatDate(DateTime d) {
     final mm = d.month.toString().padLeft(2, '0');
     final dd = d.day.toString().padLeft(2, '0');
     return '${d.year}-$mm-$dd';
   }
 
-  /// Validate and save the course
   void _save() {
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
@@ -66,6 +85,16 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       return;
     }
 
+    final semProv = context.read<SemestersProvider>();
+    final semesterId = _selectedSemesterId ?? semProv.selectedSemester?.id;
+
+    if (semesterId == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select a semester')));
+      return;
+    }
+
     final course = Course(
       name: _nameCtrl.text.trim(),
       deadline: _deadline!,
@@ -73,14 +102,16 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       studyHours: double.parse(_studyHoursCtrl.text.trim()),
     );
 
-    context.read<CoursesProvider>().addCourse(course);
+    context.read<CoursesProvider>().addCourse(course, semesterId: semesterId);
 
-    // Navigate back to courses list
     context.go('/courses');
   }
 
   @override
   Widget build(BuildContext context) {
+    final semProv = context.watch<SemestersProvider>();
+    final semesters = semProv.semesters;
+
     final deadlineText = _deadline == null
         ? 'Pick a date'
         : _formatDate(_deadline!);
@@ -104,7 +135,46 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Course name input field
+              // NEW: Semester selector
+              if (semesters.isEmpty)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('No semesters yet.'),
+                        const SizedBox(height: 8),
+                        FilledButton.icon(
+                          onPressed: () => context.go('/semesters'),
+                          icon: const Icon(Icons.school),
+                          label: const Text('Create a semester'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                DropdownButtonFormField<String>(
+                  value: _selectedSemesterId,
+                  items: semesters
+                      .map(
+                        (s) =>
+                            DropdownMenuItem(value: s.id, child: Text(s.name)),
+                      )
+                      .toList(),
+                  onChanged: (v) => setState(() => _selectedSemesterId = v),
+                  decoration: const InputDecoration(
+                    labelText: 'Semester',
+                    border: OutlineInputBorder(),
+                    helperText: 'Choose which semester this course belongs to',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'Select a semester' : null,
+                ),
+
+              const SizedBox(height: 12),
+
               TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(
@@ -114,19 +184,15 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                 ),
                 textInputAction: TextInputAction.next,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) {
+                  if (v == null || v.trim().isEmpty)
                     return 'Course name is required';
-                  }
-                  if (v.trim().length < 2) {
-                    return 'Too short';
-                  }
+                  if (v.trim().length < 2) return 'Too short';
                   return null;
                 },
               ),
 
               const SizedBox(height: 12),
 
-              // Study hours input field
               TextFormField(
                 controller: _studyHoursCtrl,
                 decoration: const InputDecoration(
@@ -143,23 +209,18 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                 ],
                 textInputAction: TextInputAction.next,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) {
+                  if (v == null || v.trim().isEmpty)
                     return 'Study hours required';
-                  }
                   final num = double.tryParse(v.trim());
-                  if (num == null || num <= 0) {
+                  if (num == null || num <= 0)
                     return 'Enter a valid positive number';
-                  }
-                  if (num > 200) {
-                    return 'Too many hours (max 200)';
-                  }
+                  if (num > 200) return 'Too many hours (max 200)';
                   return null;
                 },
               ),
 
               const SizedBox(height: 12),
 
-              // Deadline picker button
               InkWell(
                 onTap: _pickDeadline,
                 borderRadius: BorderRadius.circular(12),
@@ -172,18 +233,16 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                   child: Text(deadlineText),
                 ),
               ),
+
               const SizedBox(height: 12),
 
-              // Difficulty dropdown selector
               DropdownButtonFormField<Difficulty>(
                 initialValue: _difficulty,
                 items: Difficulty.values
                     .map(
                       (d) => DropdownMenuItem(
                         value: d,
-                        child: Text(
-                          d.name[0].toUpperCase() + d.name.substring(1),
-                        ),
+                        child: Text(d.displayName),
                       ),
                     )
                     .toList(),
@@ -197,17 +256,15 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
               const SizedBox(height: 20),
 
-              // Save button
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: _save,
+                  onPressed: semesters.isEmpty ? null : _save,
                   child: const Text('Save'),
                 ),
               ),
               const SizedBox(height: 8),
 
-              // Cancel button
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(

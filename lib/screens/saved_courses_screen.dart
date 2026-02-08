@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../models/course.dart';
 import '../models/saved_course.dart';
 import '../state/courses_provider.dart';
 import '../state/saved_courses_provider.dart';
+import '../state/semesters_provider.dart';
 
 class SavedCoursesScreen extends StatelessWidget {
   const SavedCoursesScreen({super.key});
@@ -23,6 +25,16 @@ class SavedCoursesScreen extends StatelessWidget {
 
     final deadline = DateTime(picked.year, picked.month, picked.day);
 
+    final semProv = context.read<SemestersProvider>();
+    final semesterId = semProv.selectedSemester?.id;
+
+    if (semesterId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a semester first')),
+      );
+      return;
+    }
+
     await context.read<CoursesProvider>().addCourse(
       Course(
         name: sc.name,
@@ -30,6 +42,7 @@ class SavedCoursesScreen extends StatelessWidget {
         difficulty: sc.difficulty,
         studyHours: sc.studyHours,
       ),
+      semesterId: semesterId,
     );
 
     if (!context.mounted) return;
@@ -38,7 +51,7 @@ class SavedCoursesScreen extends StatelessWidget {
       SnackBar(content: Text('Added "${sc.name}" to your courses')),
     );
 
-    Navigator.pop(context); // back to CoursesScreen
+    context.go('/courses');
   }
 
   @override
@@ -49,6 +62,11 @@ class SavedCoursesScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Saved Courses'),
+        leading: IconButton(
+          tooltip: 'Back to Courses',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.go('/courses'),
+        ),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -88,8 +106,23 @@ class SavedCoursesScreen extends StatelessWidget {
         ],
       ),
       body: SafeArea(
-        child: saved.isEmpty
-            ? const Center(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Center(
+              child: SizedBox(
+                width: 280,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Back to Courses'),
+                  onPressed: () => context.go('/courses'),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            if (saved.isEmpty)
+              const Card(
                 child: Padding(
                   padding: EdgeInsets.all(16),
                   child: Text(
@@ -98,12 +131,12 @@ class SavedCoursesScreen extends StatelessWidget {
                   ),
                 ),
               )
-            : ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: saved.length,
-                itemBuilder: (_, i) {
-                  final sc = saved[i];
-                  return Card(
+            else
+              ...List.generate(saved.length, (i) {
+                final sc = saved[i];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Card(
                     child: ListTile(
                       title: Text(sc.name),
                       subtitle: Text(
@@ -119,9 +152,11 @@ class SavedCoursesScreen extends StatelessWidget {
                         );
                       },
                     ),
-                  );
-                },
-              ),
+                  ),
+                );
+              }),
+          ],
+        ),
       ),
     );
   }
