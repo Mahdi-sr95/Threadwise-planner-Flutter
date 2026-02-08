@@ -4,12 +4,13 @@ import '../models/ai_course_parse_result.dart';
 import '../models/enums.dart';
 import 'llm_client.dart';
 
-/// AI assistant that extracts structured courses from free-form user text.
+/// Extracts courses from free-form user text using an LLM.
 ///
-/// Key goals:
-/// - Be robust to natural language dates (e.g., "15th of September 2026").
-/// - If a date is ambiguous (e.g., "09/10/2026"), ask a precise follow-up instead of failing.
-/// - Keep output strict: we only accept courses when the model marks status="complete".
+/// Goals:
+/// - Do not depend on any specific writing format (commas, dashes, bullets, etc.).
+/// - Do not depend on any specific language or keywords.
+/// - Only return "unrelated" when the model is confident the text is not about studies.
+/// - If some fields are missing (difficulty/studyHours), apply safe defaults instead of rejecting.
 class AiCourseAssistantService {
   final LLMClient _client;
 
@@ -23,20 +24,14 @@ class AiCourseAssistantService {
 
     final today = DateTime.now().toIso8601String().split('T').first;
 
-    // System prompt: strict JSON only, any language.
-    const systemPrompt = '''
+    const systemPrompt = r'''
 You are ThreadWise Planner AI Assistant.
 
-Your job:
-1) Decide if the user's text is related to study planning/courses/exams.
-2) If incomplete, ask for the missing info (be specific) WITHOUT deleting the user's text.
-3) If the text is mixed (relevant + irrelevant), ignore irrelevant parts and proceed only with relevant parts.
-4) Extract structured courses ONLY when you have enough info.
+You MUST support any language and any writing style:
+- paragraphs, bullet points, messy notes, copied messages
+- do NOT require separators like comma/dash/underscore
 
-Output requirements (VERY IMPORTANT):
-- Output ONLY a single valid JSON object.
-- No markdown, no code fences, no extra text.
-- Use exactly these fields:
+Return ONLY one valid JSON object (no markdown, no extra text) with EXACTLY this schema:
 
 {
   "status": "unrelated|incomplete|complete",
@@ -53,20 +48,21 @@ Output requirements (VERY IMPORTANT):
 }
 
 Rules:
-- If unrelated: status="unrelated", courses=[], message explains you only help with study planning/courses/exams.
-- If incomplete: status="incomplete", courses=[], message must ask *precise* missing info (e.g., which year for a date).
-- If complete: status="complete" and courses must contain 1..N courses.
-- Deadlines must be converted to YYYY-MM-DD. If user uses relative dates, use today's date as reference.
-- difficulty must be easy|medium|hard. If missing or unclear, ask (incomplete), do not guess.
-- studyHours must be a positive number. If missing or unclear, ask (incomplete), do not guess.
-- Write "message" in the SAME language as the user's text if possible.
+- Use "unrelated" ONLY if the input is clearly not about studying/courses/exams/deadlines.
+- If you can extract at least one course name and a deadline date, set status="complete".
+- If difficulty is missing/unclear, set difficulty="medium" and explain this default in "message".
+- If studyHours is missing/unclear, estimate a positive number and explain it's an estimate in "message".
+- Convert dates to YYYY-MM-DD. Resolve relative dates using "Today is ..." below.
+- Write "message" in the same language as the user's input when possible.
 ''';
 
     final prompt =
         '''
 Today is $today.
+
 User text:
 """$text"""
+
 Return ONLY the JSON object described in the instructions.
 ''';
 
@@ -85,9 +81,11 @@ Return ONLY the JSON object described in the instructions.
 
     final obj = _tryParseJsonObject(raw);
     if (obj == null) {
-      return AiCourseParseResult.error(
-        'AI output was not valid JSON. Please try again.',
-        raw: raw,
+      return AiCourseParseResult(
+        status: InputStatus.incomplete,
+        message: 'I could not parse the AI response. Please try again.',
+        courses: const [],
+        rawModelOutput: raw,
       );
     }
 
@@ -95,23 +93,11 @@ Return ONLY the JSON object described in the instructions.
     final message = (obj['message'] ?? '').toString().trim();
     final ignored = (obj['ignoredTextSummary'] ?? '').toString().trim();
 
-    final status = _statusFromString(statusStr);
-
-    // Keep message language-neutral and preserve model message if present.
+    final baseStatus = _statusFromString(statusStr);
     final combinedMessage = <String>[
       message,
       ignored,
     ].map((s) => s.trim()).where((s) => s.isNotEmpty).join('\n\n');
-
-    // Only accept extracted courses when the model explicitly says "complete".
-    if (status != InputStatus.complete) {
-      return AiCourseParseResult(
-        status: status,
-        message: combinedMessage.isEmpty ? status.message : combinedMessage,
-        courses: const [],
-        rawModelOutput: raw,
-      );
-    }
 
     final rawCourses = obj['courses'];
     final courses = <ParsedCourseDraft>[];
@@ -122,96 +108,77 @@ Return ONLY the JSON object described in the instructions.
 
         final name = (item['name'] ?? '').toString().trim();
         final deadlineRaw = (item['deadline'] ?? '').toString().trim();
-        final diffStr = (item['difficulty'] ?? '').toString().trim();
+        final diffRaw = (item['difficulty'] ?? '').toString().trim();
         final hoursRaw = item['studyHours'];
-
-        final hours = (hoursRaw is num)
-            ? hoursRaw.toDouble()
-            : double.tryParse(hoursRaw?.toString() ?? '');
 
         if (name.isEmpty) continue;
 
-        // Validate hours (if missing, we must ask, not guess).
-        if (hours == null || hours <= 0) {
+        // Deadline: must be usable; we will not "reject the user" for formatting,
+        // but we must request a deadline if AI did not provide one.
+        final deadlineIso = _normalizeToIsoDate(deadlineRaw);
+        if (deadlineIso == null) {
           return AiCourseParseResult(
             status: InputStatus.incomplete,
             message: _preferNonEmpty(
               combinedMessage,
-              'For "$name", how many study hours do you need?',
+              'Please provide a deadline date for "$name" (example: 2026-02-20).',
             ),
             courses: const [],
             rawModelOutput: raw,
           );
         }
 
-        // Validate difficulty (if missing, we must ask, not guess).
-        if (diffStr.isEmpty) {
-          return AiCourseParseResult(
-            status: InputStatus.incomplete,
-            message: _preferNonEmpty(
-              combinedMessage,
-              'For "$name", what is the difficulty (easy/medium/hard)?',
-            ),
-            courses: const [],
-            rawModelOutput: raw,
-          );
-        }
+        // Difficulty: default to medium if missing/invalid.
+        final difficulty = _difficultyFromSchema(diffRaw) ?? Difficulty.medium;
 
-        Difficulty diff;
-        try {
-          diff = _difficultyFromString(diffStr);
-        } catch (_) {
-          return AiCourseParseResult(
-            status: InputStatus.incomplete,
-            message: _preferNonEmpty(
-              combinedMessage,
-              'For "$name", difficulty must be easy/medium/hard. Which one is it?',
-            ),
-            courses: const [],
-            rawModelOutput: raw,
-          );
-        }
+        // Study hours: use AI value if valid, otherwise estimate.
+        final hours = _hoursFromAny(hoursRaw);
+        final studyHours = (hours != null && hours > 0)
+            ? hours
+            : _estimateStudyHours(deadlineIso);
 
-        // Normalize deadline robustly.
-        final norm = _normalizeDateFlexible(deadlineRaw);
-        if (norm.kind == _DateNormKind.ok) {
-          courses.add(
-            ParsedCourseDraft(
-              name: name,
-              deadline: norm.iso!,
-              difficulty: diff,
-              studyHours: hours,
-            ),
-          );
-          continue;
-        }
-
-        // If ambiguous or missing year: ask a precise follow-up question.
-        return AiCourseParseResult(
-          status: InputStatus.incomplete,
-          message: _preferNonEmpty(
-            combinedMessage,
-            'For "$name", ${norm.question ?? 'please provide a clear deadline date (YYYY-MM-DD).'}',
+        courses.add(
+          ParsedCourseDraft(
+            name: name,
+            deadline: deadlineIso,
+            difficulty: difficulty,
+            studyHours: studyHours,
           ),
-          courses: const [],
-          rawModelOutput: raw,
         );
       }
     }
 
-    if (courses.isEmpty) {
-      return AiCourseParseResult.error(
-        combinedMessage.isNotEmpty
-            ? combinedMessage
-            : 'AI marked the input as complete, but no courses were extracted. Please try again.',
-        raw: raw,
+    // If we managed to build at least one course, do not reject due to AI status.
+    if (courses.isNotEmpty) {
+      return AiCourseParseResult(
+        status: InputStatus.complete,
+        message: combinedMessage.isEmpty
+            ? InputStatus.complete.message
+            : combinedMessage,
+        courses: List.unmodifiable(courses),
+        rawModelOutput: raw,
+      );
+    }
+
+    // No extracted courses: honor unrelated/incomplete, but stay helpful.
+    if (baseStatus == InputStatus.unrelated) {
+      return AiCourseParseResult(
+        status: InputStatus.unrelated,
+        message: combinedMessage.isEmpty
+            ? InputStatus.unrelated.message
+            : combinedMessage,
+        courses: const [],
+        rawModelOutput: raw,
       );
     }
 
     return AiCourseParseResult(
-      status: InputStatus.complete,
-      message: combinedMessage.isEmpty ? status.message : combinedMessage,
-      courses: List.unmodifiable(courses),
+      status: InputStatus.incomplete,
+      message: _preferNonEmpty(
+        combinedMessage,
+        'Please include at least one course/exam name and a deadline date.',
+      ),
+      courses: const [],
       rawModelOutput: raw,
     );
   }
@@ -228,242 +195,117 @@ Return ONLY the JSON object described in the instructions.
     }
   }
 
-  Difficulty _difficultyFromString(String s) {
-    switch (s.trim().toLowerCase()) {
-      case 'easy':
-        return Difficulty.easy;
-      case 'medium':
-        return Difficulty.medium;
-      case 'hard':
-        return Difficulty.hard;
-      default:
-        throw FormatException(
-          'Invalid difficulty (expected easy|medium|hard).',
-          s,
-        );
-    }
+  Difficulty? _difficultyFromSchema(String raw) {
+    final s = raw.trim().toLowerCase();
+    if (s == 'easy') return Difficulty.easy;
+    if (s == 'medium') return Difficulty.medium;
+    if (s == 'hard') return Difficulty.hard;
+    return null;
   }
 
-  /// Returns the best message: if [primary] is non-empty, keep it; otherwise use [fallback].
+  double? _hoursFromAny(Object? raw) {
+    if (raw == null) return null;
+    if (raw is num) return raw.toDouble();
+
+    final s = raw.toString().trim();
+    if (s.isEmpty) return null;
+
+    final m = RegExp(r'(\d+(?:\.\d+)?)').firstMatch(s);
+    if (m == null) return null;
+
+    return double.tryParse(m.group(1)!);
+  }
+
+  double _estimateStudyHours(String isoDate) {
+    final dt = DateTime.tryParse(isoDate);
+    if (dt == null) return 10.0;
+
+    final today = DateTime.now();
+    final d0 = DateTime(today.year, today.month, today.day);
+    final d1 = DateTime(dt.year, dt.month, dt.day);
+    final daysLeft = d1.difference(d0).inDays;
+
+    if (daysLeft <= 3) return 18.0;
+    if (daysLeft <= 7) return 15.0;
+    if (daysLeft <= 14) return 12.0;
+    if (daysLeft <= 30) return 10.0;
+    return 8.0;
+  }
+
   String _preferNonEmpty(String primary, String fallback) {
     final p = primary.trim();
     return p.isNotEmpty ? p : fallback;
   }
 
-  // -------------------------
-  // Date normalization
-  // -------------------------
+  /// Normalizes a date string to YYYY-MM-DD.
+  ///
+  /// We keep this intentionally minimal and language-agnostic:
+  /// - Accepts YYYY-MM-DD (and YYYY/MM/DD, YYYY.MM.DD)
+  /// - Accepts DD/MM/YYYY or MM/DD/YYYY (tries both; if ambiguous, prefers day-first)
+  /// - Accepts a full ISO datetime by taking the first 10 characters
+  String? _normalizeToIsoDate(String raw) {
+    final s0 = raw.trim();
+    if (s0.isEmpty) return null;
 
-  _DateNorm _normalizeDateFlexible(String raw) {
-    final s = raw.trim();
-    if (s.isEmpty) {
-      return const _DateNorm(
-        kind: _DateNormKind.needClarification,
-        question: 'what is the deadline date?',
-      );
+    // Full ISO datetime -> use first 10 chars if possible.
+    if (s0.length >= 10) {
+      final head = s0.substring(0, 10);
+      final headIso = _normalizeIsoLike(head);
+      if (headIso != null) return headIso;
     }
 
-    // 1) ISO-like: YYYY-MM-DD or YYYY-M-D
-    final iso = _normalizeIsoDate(s);
-    if (iso != null) return _DateNorm.ok(iso);
+    // ISO-like
+    final iso = _normalizeIsoLike(s0);
+    if (iso != null) return iso;
 
-    // 2) Relative keywords (very minimal; model should usually convert these already)
-    final lower = s.toLowerCase();
-    if (lower == 'today') {
-      final d = DateTime.now();
-      return _DateNorm.ok(_padIso(d.year, d.month, d.day));
-    }
-    if (lower == 'tomorrow') {
-      final d = DateTime.now().add(const Duration(days: 1));
-      return _DateNorm.ok(_padIso(d.year, d.month, d.day));
-    }
+    // Numeric day/month/year
+    final numeric = RegExp(
+      r'^\s*(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})\s*$',
+    ).firstMatch(s0);
+    if (numeric != null) {
+      final a = int.tryParse(numeric.group(1)!);
+      final b = int.tryParse(numeric.group(2)!);
+      final y = int.tryParse(numeric.group(3)!);
+      if (a == null || b == null || y == null) return null;
 
-    // 3) Numeric: DD/MM/YYYY or MM/DD/YYYY (ambiguous when both <=12)
-    final slash = RegExp(r'^\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*$');
-    final m = slash.firstMatch(s);
-    if (m != null) {
-      final a = int.tryParse(m.group(1)!);
-      final b = int.tryParse(m.group(2)!);
-      final y = int.tryParse(m.group(3)!);
+      // Prefer day-first, but also try swapped if day-first invalid.
+      final dayFirst = _padIso(y, b, a);
+      if (dayFirst != null) return dayFirst;
 
-      if (a == null || b == null || y == null) {
-        return const _DateNorm(
-          kind: _DateNormKind.needClarification,
-          question: 'please provide the date as YYYY-MM-DD.',
-        );
-      }
+      final monthFirst = _padIso(y, a, b);
+      if (monthFirst != null) return monthFirst;
 
-      // If both could be month/day -> ask to clarify format
-      final aIsMonth = a >= 1 && a <= 12;
-      final bIsMonth = b >= 1 && b <= 12;
-
-      if (aIsMonth && bIsMonth && a != b) {
-        return const _DateNorm(
-          kind: _DateNormKind.needClarification,
-          question: 'is this date in DD/MM/YYYY or MM/DD/YYYY format?',
-        );
-      }
-
-      // Prefer DD/MM/YYYY when unambiguous (e.g., 15/09/2026).
-      final day = a;
-      final month = b;
-
-      if (_isValidYmd(y, month, day)) {
-        return _DateNorm.ok(_padIso(y, month, day));
-      }
-
-      // Try swapped as fallback if first attempt invalid.
-      final day2 = b;
-      final month2 = a;
-      if (_isValidYmd(y, month2, day2)) {
-        return _DateNorm.ok(_padIso(y, month2, day2));
-      }
-
-      return const _DateNorm(
-        kind: _DateNormKind.needClarification,
-        question: 'please provide a valid date as YYYY-MM-DD.',
-      );
+      return null;
     }
 
-    // 4) Month names (English): "15th of September 2026", "Sep 15, 2026", "15 Sep 2026"
-    final monthName = _parseMonthNameDate(s);
-    if (monthName != null) return monthName;
-
-    return const _DateNorm(
-      kind: _DateNormKind.needClarification,
-      question:
-          'please provide the deadline as YYYY-MM-DD (or include the year, e.g., "15 Sep 2026").',
-    );
+    return null;
   }
 
-  /// Accepts YYYY-MM-DD and tolerates YYYY-M-D, returns strictly padded YYYY-MM-DD.
-  String? _normalizeIsoDate(String raw) {
-    final s = raw.trim();
+  String? _normalizeIsoLike(String raw) {
+    final s = raw.trim().replaceAll('/', '-').replaceAll('.', '-');
     final parts = s.split('-');
     if (parts.length != 3) return null;
 
     final y = int.tryParse(parts[0]);
     final m = int.tryParse(parts[1]);
     final d = int.tryParse(parts[2]);
-
     if (y == null || m == null || d == null) return null;
-    if (!_isValidYmd(y, m, d)) return null;
 
     return _padIso(y, m, d);
   }
 
-  _DateNorm? _parseMonthNameDate(String s) {
-    final months = _monthMap();
+  String? _padIso(int y, int m, int d) {
+    if (m < 1 || m > 12) return null;
+    if (d < 1 || d > 31) return null;
 
-    // Pattern: 15th of September 2026
-    final p1 = RegExp(
-      r'^\s*(\d{1,2})(?:st|nd|rd|th)?\s*(?:of\s+)?([A-Za-z]+)\s*,?\s*(\d{4})\s*$',
-      caseSensitive: false,
-    );
-    final m1 = p1.firstMatch(s);
-    if (m1 != null) {
-      final day = int.tryParse(m1.group(1)!);
-      final monStr = m1.group(2)!.toLowerCase();
-      final year = int.tryParse(m1.group(3)!);
+    // Validate using DateTime normalization rules.
+    final dt = DateTime(y, m, d);
+    if (dt.year != y || dt.month != m || dt.day != d) return null;
 
-      final month = months[monStr];
-      if (day == null || year == null || month == null) return null;
-
-      if (_isValidYmd(year, month, day)) {
-        return _DateNorm.ok(_padIso(year, month, day));
-      }
-      return const _DateNorm(
-        kind: _DateNormKind.needClarification,
-        question: 'that date seems invalid; please provide a valid YYYY-MM-DD.',
-      );
-    }
-
-    // Pattern: Sep 15, 2026
-    final p2 = RegExp(
-      r'^\s*([A-Za-z]+)\s*(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})\s*$',
-      caseSensitive: false,
-    );
-    final m2 = p2.firstMatch(s);
-    if (m2 != null) {
-      final monStr = m2.group(1)!.toLowerCase();
-      final day = int.tryParse(m2.group(2)!);
-      final year = int.tryParse(m2.group(3)!);
-
-      final month = months[monStr];
-      if (day == null || year == null || month == null) return null;
-
-      if (_isValidYmd(year, month, day)) {
-        return _DateNorm.ok(_padIso(year, month, day));
-      }
-      return const _DateNorm(
-        kind: _DateNormKind.needClarification,
-        question: 'that date seems invalid; please provide a valid YYYY-MM-DD.',
-      );
-    }
-
-    // Pattern: 15 Sep (missing year) => ask year
-    final p3 = RegExp(
-      r'^\s*(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]+)\s*$',
-      caseSensitive: false,
-    );
-    final m3 = p3.firstMatch(s);
-    if (m3 != null) {
-      return const _DateNorm(
-        kind: _DateNormKind.needClarification,
-        question: 'which year is this deadline in?',
-      );
-    }
-
-    return null;
-  }
-
-  Map<String, int> _monthMap() => const {
-    'jan': 1,
-    'january': 1,
-    'feb': 2,
-    'february': 2,
-    'mar': 3,
-    'march': 3,
-    'apr': 4,
-    'april': 4,
-    'may': 5,
-    'jun': 6,
-    'june': 6,
-    'jul': 7,
-    'july': 7,
-    'aug': 8,
-    'august': 8,
-    'sep': 9,
-    'sept': 9,
-    'september': 9,
-    'oct': 10,
-    'october': 10,
-    'nov': 11,
-    'november': 11,
-    'dec': 12,
-    'december': 12,
-  };
-
-  bool _isValidYmd(int y, int m, int d) {
-    if (m < 1 || m > 12) return false;
-    if (d < 1 || d > 31) return false;
-    try {
-      final dt = DateTime(y, m, d);
-      return dt.year == y && dt.month == m && dt.day == d;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  String _padIso(int y, int m, int d) {
     final mm = m.toString().padLeft(2, '0');
     final dd = d.toString().padLeft(2, '0');
     return '$y-$mm-$dd';
   }
-
-  // -------------------------
-  // JSON parsing
-  // -------------------------
 
   Map<String, dynamic>? _tryParseJsonObject(String raw) {
     final trimmed = raw.trim();
@@ -476,7 +318,7 @@ Return ONLY the JSON object described in the instructions.
       if (decoded is Map) return decoded.cast<String, dynamic>();
     } catch (_) {}
 
-    // Recovery: extract outermost {...}
+    // Recovery: extract outermost {...}.
     final start = trimmed.indexOf('{');
     final end = trimmed.lastIndexOf('}');
     if (start < 0 || end <= start) return null;
@@ -490,18 +332,7 @@ Return ONLY the JSON object described in the instructions.
       return null;
     }
 
+    // Explicit null return to satisfy analyzer warning (nullable return type).
     return null;
   }
-}
-
-enum _DateNormKind { ok, needClarification }
-
-class _DateNorm {
-  final _DateNormKind kind;
-  final String? iso;
-  final String? question;
-
-  const _DateNorm({required this.kind, this.iso, this.question});
-
-  const _DateNorm.ok(String iso) : this(kind: _DateNormKind.ok, iso: iso);
 }
