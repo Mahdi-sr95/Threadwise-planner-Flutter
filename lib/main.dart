@@ -17,6 +17,7 @@ import 'state/plan_provider.dart';
 import 'state/saved_courses_provider.dart';
 import 'state/semesters_provider.dart';
 import 'state/settings_provider.dart';
+import 'services/notifications_service.dart';
 
 /// Main entry point for the ThreadWise Planner app.
 /// Initializes providers and sets up routing.
@@ -58,6 +59,8 @@ class _ThreadWiseAppState extends State<ThreadWiseApp> {
 
     // Ensure CoursesProvider starts with the selected semester.
     _coursesProvider.setSelectedSemester(_semestersProvider.selectedSemesterId);
+
+    await NotificationsService.instance.init();
 
     // Saved courses are derived from previous plans.
     _savedCoursesProvider = SavedCoursesProvider();

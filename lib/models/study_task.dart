@@ -16,6 +16,10 @@ class StudyTask {
     required this.difficulty,
   });
 
+  /// Stable key used for notifications, if you edit subject/task/time, the key changes
+  String get key =>
+      '${subject.trim()}|${task.trim()}|${dateTime.toIso8601String()}';
+
   Map<String, dynamic> toJson() {
     return {
       'subject': subject,
@@ -41,13 +45,9 @@ class StudyTask {
   String get formattedDuration {
     final hours = durationHours.floor();
     final minutes = ((durationHours - hours) * 60).round();
-    if (hours == 0) {
-      return '${minutes}m';
-    } else if (minutes == 0) {
-      return '${hours}h';
-    } else {
-      return '${hours}h ${minutes}m';
-    }
+    if (hours == 0) return '${minutes}m';
+    if (minutes == 0) return '${hours}h';
+    return '${hours}h ${minutes}m';
   }
 
   String get formattedDateTime {

@@ -8,6 +8,7 @@ import '../models/enums.dart';
 import '../models/saved_plan.dart';
 import '../models/study_task.dart';
 import '../services/llm_planner_service.dart';
+import '../services/notifications_service.dart';
 
 /// Provider responsible for plan generation and persisted plan history.
 class PlanProvider extends ChangeNotifier {
@@ -52,8 +53,9 @@ class PlanProvider extends ChangeNotifier {
     final d = DateTime(day.year, day.month, day.day);
     if (_selectedDay.year == d.year &&
         _selectedDay.month == d.month &&
-        _selectedDay.day == d.day)
+        _selectedDay.day == d.day) {
       return;
+    }
     _selectedDay = d;
     notifyListeners();
   }
@@ -74,6 +76,30 @@ class PlanProvider extends ChangeNotifier {
     try {
       await Future.delayed(const Duration(milliseconds: 300));
       _tasks = PlannerService.generatePlan(courses, _strategy);
+
+      //Schedule notifications for the generated plan
+      await NotificationsService.instance.requestPermissionsIfNeeded();
+      await NotificationsService.instance.rescheduleAll(
+        tasks: _tasks,
+        taskKeyOf: (t) => t.key,
+        notifyBefore: Duration.zero, // change to e.g. Duration(minutes: 5)
+      );
+
+      // Keep selected day sensible
+      if (_tasks.isNotEmpty) {
+        final first =
+            _tasks
+                .map(
+                  (t) => DateTime(
+                    t.dateTime.year,
+                    t.dateTime.month,
+                    t.dateTime.day,
+                  ),
+                )
+                .toList()
+              ..sort();
+        _selectedDay = first.first;
+      }
     } catch (e) {
       _tasks = <StudyTask>[];
       _error = e.toString();
@@ -107,6 +133,7 @@ class PlanProvider extends ChangeNotifier {
   void loadPlan(SavedPlan plan) {
     _strategy = plan.strategy;
     _tasks = List<StudyTask>.from(plan.tasks);
+
     if (_tasks.isNotEmpty) {
       final first =
           _tasks
@@ -117,7 +144,17 @@ class PlanProvider extends ChangeNotifier {
               .toList()
             ..sort();
       _selectedDay = first.first;
+
+      //Reschedule notifications for the loaded plan
+      NotificationsService.instance.rescheduleAll(
+        tasks: _tasks,
+        taskKeyOf: (t) => t.key,
+        notifyBefore: Duration.zero,
+      );
+    } else {
+      NotificationsService.instance.cancelAll();
     }
+
     notifyListeners();
   }
 
@@ -166,6 +203,9 @@ class PlanProvider extends ChangeNotifier {
     _tasks = <StudyTask>[];
     _error = null;
     _selectedDay = DateTime.now();
+
+    //Cancel notifications when plan is cleared
+    NotificationsService.instance.cancelAll();
 
     notifyListeners();
   }
