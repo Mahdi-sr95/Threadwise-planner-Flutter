@@ -1,4 +1,3 @@
-﻿// ai_course_parse_result.dart
 import 'course.dart';
 import 'enums.dart';
 
@@ -22,7 +21,10 @@ class ParsedCourseDraft {
   DateTime get deadlineDate {
     final parts = deadline.trim().split('-');
     if (parts.length != 3) {
-      throw FormatException('Invalid deadline (expected YYYY-MM-DD).', deadline);
+      throw FormatException(
+        'Invalid deadline (expected YYYY-MM-DD).',
+        deadline,
+      );
     }
 
     final y = int.tryParse(parts[0]);
@@ -30,7 +32,10 @@ class ParsedCourseDraft {
     final d = int.tryParse(parts[2]);
 
     if (y == null || m == null || d == null) {
-      throw FormatException('Invalid deadline (expected YYYY-MM-DD).', deadline);
+      throw FormatException(
+        'Invalid deadline (expected YYYY-MM-DD).',
+        deadline,
+      );
     }
 
     return DateTime(y, m, d);
@@ -63,7 +68,8 @@ class AiCourseParseResult {
     required this.rawModelOutput,
   });
 
-  bool get canAddCourses => status == InputStatus.complete && courses.isNotEmpty;
+  bool get canAddCourses =>
+      status == InputStatus.complete && courses.isNotEmpty;
 
   static AiCourseParseResult error(String msg, {String raw = ''}) {
     return AiCourseParseResult(

@@ -1,5 +1,6 @@
-﻿import 'package:device_calendar/device_calendar.dart';
+import 'package:device_calendar/device_calendar.dart';
 
+/// Wrapper around [DeviceCalendarPlugin] to keep calendar access logic in one place.
 class CalendarImportService {
   final DeviceCalendarPlugin _plugin = DeviceCalendarPlugin();
 
@@ -18,10 +19,8 @@ class CalendarImportService {
     required DateTime from,
     required DateTime to,
   }) async {
-    final params = RetrieveEventsParams(
-      startDate: from,
-      endDate: to,
-    );
+    final params = RetrieveEventsParams(startDate: from, endDate: to);
+
     final result = await _plugin.retrieveEvents(calendarId, params);
     return (result.data ?? <Event>[]);
   }

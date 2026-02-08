@@ -158,6 +158,76 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     return _selectedSemesterId ?? semProv.selectedSemesterId;
   }
 
+  /// Builds a searchable text from calendar event fields.
+  /// We intentionally include more than title to reduce false positives.
+  String _eventToSearchText(Event e) {
+    final title = (e.title ?? '').trim();
+    final desc = (e.description ?? '').trim();
+    final loc = (e.location ?? '').trim();
+
+    return <String>[
+      title,
+      desc,
+      loc,
+    ].map((s) => s.trim()).where((s) => s.isNotEmpty).join(' | ');
+  }
+
+  /// Very simple rule-based filter to reduce false positives.
+  /// Conservative: if we are not confident it's academic, we skip it.
+  bool _isLikelyAcademicEvent(String text) {
+    final t = text.toLowerCase();
+
+    final exclude = <String>[
+      'birthday',
+      'anniversary',
+      'holiday',
+      'vacation',
+      'dentist',
+      'doctor',
+      'gym',
+      'lunch',
+      'dinner',
+      'coffee',
+      'meeting',
+      'standup',
+      'call',
+      'reminder',
+    ];
+
+    final include = <String>[
+      'exam',
+      'midterm',
+      'final',
+      'quiz',
+      'assignment',
+      'homework',
+      'project',
+      'lab',
+      'lecture',
+      'class',
+      'tutorial',
+      'seminar',
+      'deadline',
+      'due',
+      'submission',
+      'submit',
+      'assessment',
+      'presentation',
+    ];
+
+    final hasInclude = include.any(t.contains);
+    final hasExclude = exclude.any(t.contains);
+
+    if (hasInclude) return true;
+    if (hasExclude) return false;
+
+    // Course-code heuristic (e.g., "CS101", "MATH 204").
+    final code = RegExp(r'\b[a-z]{2,6}\s*\d{2,4}\b', caseSensitive: false);
+    if (code.hasMatch(text)) return true;
+
+    return false;
+  }
+
   // -------------------------
   // Manual save
   // -------------------------
@@ -416,15 +486,22 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       final seen = <String>{};
 
       for (final e in events) {
-        final title = (e.title ?? '').trim();
         final start = e.start;
+        if (start == null) continue;
 
-        if (title.isEmpty || start == null) continue;
+        final eventText = _eventToSearchText(e);
+        if (eventText.isEmpty) continue;
+
+        // Apply rule-based filtering to reduce false positives.
+        if (!_isLikelyAcademicEvent(eventText)) continue;
+
+        // Use title as the course name (keep it simple and predictable).
+        final title = (e.title ?? '').trim();
+        if (title.isEmpty) continue;
 
         final deadline = DateTime(start.year, start.month, start.day);
         final key = '${title.toLowerCase()}|${_formatDate(deadline)}';
 
-        // Avoid duplicates by title+date key.
         if (seen.contains(key)) continue;
         seen.add(key);
 
@@ -449,7 +526,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
             List<int>.generate(drafts.length, (i) => i),
           ); // default: select all
         _calError = drafts.isEmpty
-            ? 'No usable events found in the selected time range.'
+            ? 'No academic-looking events found (try naming events like "Exam", "Quiz", "Assignment", etc.).'
             : null;
       });
     } catch (e) {
@@ -555,7 +632,8 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
-                        value: effectiveSemesterId,
+                        // Flutter deprecates `value` in some versions; `initialValue` is preferred.
+                        initialValue: effectiveSemesterId,
                         items: semesters
                             .map(
                               (s) => DropdownMenuItem(
@@ -606,7 +684,25 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Paste a description of your courses/exams. The AI will validate your text and show a preview before adding.',
+                        'Write naturally. The AI will extract courses and ask follow-up questions if needed.',
+                      ),
+                      const SizedBox(height: 10),
+                      // Clear, visible examples (not only hint text).
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          'Examples:\n'
+                          '- Database Systems exam on 15th of September 2026, difficulty medium, need 12 hours.\n'
+                          '- Mobile App Dev project due 2026-02-20 (hard), need 20 hours.\n'
+                          '- Quiz: Linear Algebra on 20/02/2026, medium, 6 hours.',
+                        ),
                       ),
                       const SizedBox(height: 12),
                       TextField(
@@ -616,7 +712,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Describe your courses',
                           hintText:
-                              'Example:\nDatabase Systems exam on 2026-02-20 (medium), need 12 hours.\nMobile App Dev on 2026-02-15 (hard), need 20 hours.',
+                              'You can paste a paragraph; no strict format required.',
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -657,7 +753,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                                 ? null
                                 : () {
                                     _aiTextCtrl
-                                        .clear(); // only on explicit user action
+                                        .clear(); // explicit user action only
                                     setState(() {
                                       _aiResult = null;
                                       _aiError = null;
@@ -718,7 +814,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Import upcoming events and convert them into courses. You can unselect items before adding.',
+                        'Imports only academic-looking events (based on title + description + location).',
                       ),
                       const SizedBox(height: 12),
                       if (_calLoading) const LinearProgressIndicator(),
