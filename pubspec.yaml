@@ -25,7 +25,6 @@ dependencies:
   # Local storage with SharedPreferences
   shared_preferences: ^2.2.2
 
-
   csv: ^6.0.0
   path_provider: ^2.1.5
   share_plus: ^10.1.4
@@ -33,6 +32,10 @@ dependencies:
   # Calendar integration
   device_calendar: ^4.3.3
   table_calendar: ^3.1.2
+
+  flutter_local_notifications: ^17.2.4
+  timezone: ^0.9.4
+  flutter_timezone: ^3.0.1
 
 dev_dependencies:
   flutter_test:
