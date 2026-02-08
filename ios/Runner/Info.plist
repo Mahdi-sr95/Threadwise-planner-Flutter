@@ -4,6 +4,8 @@
 <dict>
 	<key>NSCalendarsUsageDescription</key>
 	<string>This app needs access to your calendar to import exam deadlines.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>This app needs full access to your calendar to import upcoming exam deadlines.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

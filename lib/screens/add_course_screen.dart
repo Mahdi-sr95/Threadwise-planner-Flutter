@@ -209,14 +209,18 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
       final msg = e.toString();
       if (msg.contains('Failed host lookup') || msg.contains('SocketException')) {
-        setState(() => _aiError =
-            'AI request failed due to network/DNS. Check internet/VPN/Private DNS.\nDetails: $e');
+        setState(
+          () => _aiError =
+              'AI request failed due to network/DNS. Check internet/VPN/Private DNS.\nDetails: $e',
+        );
       } else {
         setState(() => _aiError = 'Unexpected error: $e');
       }
     } finally {
-      if (!mounted) return;
-      setState(() => _aiLoading = false);
+      // IMPORTANT: Avoid `return` inside `finally` (control_flow_in_finally).
+      if (mounted) {
+        setState(() => _aiLoading = false);
+      }
     }
   }
 
@@ -248,8 +252,10 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       if (!mounted) return;
       setState(() => _aiError = 'Failed to add courses: $e');
     } finally {
-      if (!mounted) return;
-      setState(() => _aiLoading = false);
+      // IMPORTANT: Avoid `return` inside `finally` (control_flow_in_finally).
+      if (mounted) {
+        setState(() => _aiLoading = false);
+      }
     }
   }
 
@@ -394,8 +400,10 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
         _calSelected.clear();
       });
     } finally {
-      if (!mounted) return;
-      setState(() => _calLoading = false);
+      // IMPORTANT: Avoid `return` inside `finally` (control_flow_in_finally).
+      if (mounted) {
+        setState(() => _calLoading = false);
+      }
     }
   }
 
@@ -429,8 +437,10 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       if (!mounted) return;
       setState(() => _calError = 'Failed to add imported courses: $e');
     } finally {
-      if (!mounted) return;
-      setState(() => _calLoading = false);
+      // IMPORTANT: Avoid `return` inside `finally` (control_flow_in_finally).
+      if (mounted) {
+        setState(() => _calLoading = false);
+      }
     }
   }
 
@@ -520,7 +530,10 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                       if (_aiResult != null && _aiResult!.canAddCourses) ...[
                         const SizedBox(height: 12),
                         const Divider(),
-                        Text('Preview (${_aiResult!.courses.length})', style: Theme.of(context).textTheme.titleSmall),
+                        Text(
+                          'Preview (${_aiResult!.courses.length})',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
                         const SizedBox(height: 8),
                         ..._aiResult!.courses.map(
                           (c) => ListTile(
@@ -528,7 +541,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                             leading: const Icon(Icons.school),
                             title: Text(c.name),
                             subtitle: Text(
-                              'Deadline: ${_formatDate(c.deadline)}  Difficulty: ${c.difficulty.displayName}  Hours: ${c.studyHours}',
+                              'Deadline: ${c.deadline}  Difficulty: ${c.difficulty.displayName}  Hours: ${c.studyHours}',
                             ),
                           ),
                         ),
@@ -557,9 +570,14 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Import from Calendar (Android/iOS)', style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        'Import from Calendar (Android/iOS)',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 8),
-                      const Text('Import upcoming events and convert them into courses. You can unselect items before adding.'),
+                      const Text(
+                        'Import upcoming events and convert them into courses. You can unselect items before adding.',
+                      ),
                       const SizedBox(height: 12),
                       if (_calLoading) const LinearProgressIndicator(),
                       if (_calError != null) ...[
@@ -701,7 +719,12 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
               DropdownButtonFormField<Difficulty>(
                 initialValue: _difficulty,
                 items: Difficulty.values
-                    .map((d) => DropdownMenuItem(value: d, child: Text(d.name[0].toUpperCase() + d.name.substring(1))))
+                    .map(
+                      (d) => DropdownMenuItem(
+                        value: d,
+                        child: Text(d.name[0].toUpperCase() + d.name.substring(1)),
+                      ),
+                    )
                     .toList(),
                 onChanged: (v) => setState(() => _difficulty = v ?? Difficulty.medium),
                 decoration: const InputDecoration(

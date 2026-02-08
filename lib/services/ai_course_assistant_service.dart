@@ -1,4 +1,5 @@
-﻿import 'dart:convert';
+﻿// ai_course_assistant_service.dart
+import 'dart:convert';
 
 import '../models/ai_course_parse_result.dart';
 import '../models/enums.dart';
@@ -17,8 +18,8 @@ class AiCourseAssistantService {
 
     final today = DateTime.now().toIso8601String().split('T').first;
 
-    // System prompt: forces the model to do ALL validation + extraction,
-    // and return strict JSON only.
+    // System prompt: the model must do validation + extraction for ANY language
+    // and return strict JSON only (no markdown, no extra text).
     const systemPrompt = '''
 You are ThreadWise Planner AI Assistant.
 
@@ -51,8 +52,9 @@ Rules:
 - If incomplete: status="incomplete", courses=[] and message must clearly ask what is missing (e.g., deadlines, difficulty, study hours).
 - If complete: status="complete" and courses must contain 1..N courses.
 - Deadlines must be converted to YYYY-MM-DD. If user uses relative dates, use today's date as reference.
-- difficulty must be easy|medium|hard. If missing, ask (incomplete)  do not guess.
-- studyHours must be a positive number. If missing, ask (incomplete)  do not guess.
+- difficulty must be easy|medium|hard. If missing, ask (incomplete) do not guess.
+- studyHours must be a positive number. If missing, ask (incomplete) do not guess.
+- Write the "message" in the SAME language as the user's text if possible.
 ''';
 
     final prompt = '''
@@ -76,7 +78,7 @@ Return ONLY the JSON object described in the instructions.
       return AiCourseParseResult.error('AI request failed: $e');
     }
 
-    final Map<String, dynamic>? obj = _tryParseJsonObject(raw);
+    final obj = _tryParseJsonObject(raw);
     if (obj == null) {
       return AiCourseParseResult.error(
         'AI output was not valid JSON. Please try again.',
@@ -89,17 +91,32 @@ Return ONLY the JSON object described in the instructions.
     final ignored = (obj['ignoredTextSummary'] ?? '').toString().trim();
 
     final status = _statusFromString(statusStr);
-    final finalMessage = ignored.isEmpty ? message : '$message\n\nIgnored: $ignored';
+
+    // Do not add English labels like "Ignored:"; keep output language-neutral.
+    final combinedMessage = <String>[message, ignored]
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .join('\n\n');
+
+    // Safety rule: only accept extracted courses when the model explicitly says "complete".
+    if (status != InputStatus.complete) {
+      return AiCourseParseResult(
+        status: status,
+        message: combinedMessage.isEmpty ? status.message : combinedMessage,
+        courses: const [],
+        rawModelOutput: raw,
+      );
+    }
 
     final List<ParsedCourseDraft> courses = [];
+    final rawCourses = obj['courses'];
 
-    final dynamic rawCourses = obj['courses'];
     if (rawCourses is List) {
       for (final item in rawCourses) {
         if (item is! Map) continue;
 
         final name = (item['name'] ?? '').toString().trim();
-        final deadline = (item['deadline'] ?? '').toString().trim();
+        final deadlineRaw = (item['deadline'] ?? '').toString().trim();
         final diffStr = (item['difficulty'] ?? '').toString().trim();
         final hoursRaw = item['studyHours'];
 
@@ -107,42 +124,43 @@ Return ONLY the JSON object described in the instructions.
             ? hoursRaw.toDouble()
             : double.tryParse(hoursRaw?.toString() ?? '');
 
-        if (name.isEmpty || deadline.isEmpty || hours == null) continue;
+        if (name.isEmpty || hours == null || hours <= 0) continue;
 
-        Difficulty diff;
-        switch (diffStr.toLowerCase()) {
-          case 'easy':
-            diff = Difficulty.easy;
-            break;
-          case 'medium':
-            diff = Difficulty.medium;
-            break;
-          case 'hard':
-            diff = Difficulty.hard;
-            break;
-          default:
-            // If model didn't follow rules, treat as incomplete.
-            return AiCourseParseResult.error(
-              'AI returned an invalid difficulty. Please try again.',
-              raw: raw,
-            );
-        }
-
-        // Validate date format lightly (YYYY-MM-DD). If invalid -> error.
-        final okDate = RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(deadline);
-        if (!okDate) {
+        final normalizedDeadline = _normalizeIsoDate(deadlineRaw);
+        if (normalizedDeadline == null) {
           return AiCourseParseResult.error(
-            'AI returned an invalid deadline format. Please try again.',
+            combinedMessage.isNotEmpty
+                ? combinedMessage
+                : 'AI returned an invalid deadline format. Please try again.',
             raw: raw,
           );
         }
 
-        if (hours <= 0) continue;
+        if (diffStr.isEmpty) {
+          return AiCourseParseResult.error(
+            combinedMessage.isNotEmpty
+                ? combinedMessage
+                : 'AI returned an empty difficulty. Please try again.',
+            raw: raw,
+          );
+        }
+
+        Difficulty diff;
+        try {
+          diff = _difficultyFromString(diffStr);
+        } catch (_) {
+          return AiCourseParseResult.error(
+            combinedMessage.isNotEmpty
+                ? combinedMessage
+                : 'AI returned an invalid difficulty. Please try again.',
+            raw: raw,
+          );
+        }
 
         courses.add(
           ParsedCourseDraft(
             name: name,
-            deadline: deadline,
+            deadline: normalizedDeadline,
             difficulty: diff,
             studyHours: hours,
           ),
@@ -150,17 +168,18 @@ Return ONLY the JSON object described in the instructions.
       }
     }
 
-    // If status is complete but no courses parsed, downgrade to incomplete.
-    if (status == InputStatus.complete && courses.isEmpty) {
+    if (courses.isEmpty) {
       return AiCourseParseResult.error(
-        'AI marked the input as complete, but no courses were extracted. Please try again.',
+        combinedMessage.isNotEmpty
+            ? combinedMessage
+            : 'AI marked the input as complete, but no courses were extracted. Please try again.',
         raw: raw,
       );
     }
 
     return AiCourseParseResult(
       status: status,
-      message: finalMessage.isEmpty ? status.message : finalMessage,
+      message: combinedMessage.isEmpty ? status.message : combinedMessage,
       courses: List.unmodifiable(courses),
       rawModelOutput: raw,
     );
@@ -178,8 +197,42 @@ Return ONLY the JSON object described in the instructions.
     }
   }
 
+  Difficulty _difficultyFromString(String s) {
+    switch (s.trim().toLowerCase()) {
+      case 'easy':
+        return Difficulty.easy;
+      case 'medium':
+        return Difficulty.medium;
+      case 'hard':
+        return Difficulty.hard;
+      default:
+        throw FormatException('Invalid difficulty (expected easy|medium|hard).', s);
+    }
+  }
+
+  /// Accepts YYYY-MM-DD and also tolerates YYYY-M-D, returns strictly padded YYYY-MM-DD.
+  String? _normalizeIsoDate(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+
+    final parts = s.split('-');
+    if (parts.length != 3) return null;
+
+    final y = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    final d = int.tryParse(parts[2]);
+
+    if (y == null || m == null || d == null) return null;
+    if (m < 1 || m > 12) return null;
+    if (d < 1 || d > 31) return null;
+
+    final mm = m.toString().padLeft(2, '0');
+    final dd = d.toString().padLeft(2, '0');
+    return '$y-$mm-$dd';
+  }
+
   Map<String, dynamic>? _tryParseJsonObject(String raw) {
-    // Expecting strict JSON, but still try to recover if model adds junk.
+    // Expecting strict JSON, but still try to recover if the model adds junk.
     final trimmed = raw.trim();
     if (trimmed.isEmpty) return null;
 
@@ -190,7 +243,7 @@ Return ONLY the JSON object described in the instructions.
       if (decoded is Map) return decoded.cast<String, dynamic>();
     } catch (_) {}
 
-    // Recovery attempt: extract first {...} block.
+    // Recovery attempt: extract the outermost {...} block.
     final start = trimmed.indexOf('{');
     final end = trimmed.lastIndexOf('}');
     if (start < 0 || end <= start) return null;
