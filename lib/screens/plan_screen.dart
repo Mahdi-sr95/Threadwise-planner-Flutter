@@ -1,17 +1,17 @@
-﻿
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/saved_courses_provider.dart';
-
 import '../models/enums.dart';
 import '../models/study_task.dart';
 import '../state/courses_provider.dart';
 import '../state/plan_provider.dart';
 import 'package:go_router/go_router.dart';
 import '../services/csv_export_service.dart';
+import '../services/ics_export_service.dart';
 
-/// Displays the generated plan, allows strategy selection, saving and loading history.
+/// Displays the generated plan, allows strategy selection, saving and loading
+/// history.
 class PlanScreen extends StatelessWidget {
   const PlanScreen({super.key});
 
@@ -31,6 +31,7 @@ class PlanScreen extends StatelessWidget {
   }
 
   static final CsvExportService _csvExporter = CsvExportService();
+  static final IcsExportService icsExporter = IcsExportService();
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +39,7 @@ class PlanScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Study Plan'),
         actions: [
+          // History button (uses _showHistoryDialog)
           Consumer<PlanProvider>(
             builder: (context, planProvider, _) {
               return IconButton(
@@ -48,6 +50,27 @@ class PlanScreen extends StatelessWidget {
                 ),
                 tooltip: 'Plan History',
                 onPressed: () => _showHistoryDialog(context),
+              );
+            },
+          ),
+          // Export CSV button
+          Consumer<PlanProvider>(
+            builder: (context, planProvider, _) {
+              return IconButton.filledTonal(
+                icon: const Icon(Icons.download),
+                tooltip: 'Export CSV',
+                onPressed: planProvider.tasks.isEmpty
+                    ? null
+                    : () async {
+                        try {
+                          await _csvExporter.exportCsv(planProvider.tasks);
+                        } catch (e) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('CSV export failed: $e')),
+                          );
+                        }
+                      },
               );
             },
           ),
@@ -171,20 +194,18 @@ class PlanScreen extends StatelessWidget {
                 Consumer<PlanProvider>(
                   builder: (context, planProvider, _) {
                     return IconButton.filledTonal(
-                      icon: const Icon(Icons.download),
-                      tooltip: 'Export CSV',
+                      icon: const Icon(Icons.event_available),
+                      tooltip: 'Export ICS',
                       onPressed: planProvider.tasks.isEmpty
                           ? null
                           : () async {
                               try {
-                                await _csvExporter.exportCsv(
-                                  planProvider.tasks,
-                                );
+                                await icsExporter.exportIcs(planProvider.tasks);
                               } catch (e) {
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text('CSV export failed: $e'),
+                                    content: Text('ICS export failed: $e'),
                                   ),
                                 );
                               }
@@ -525,6 +546,3 @@ class PlanScreen extends StatelessWidget {
     }
   }
 }
-
-
-
