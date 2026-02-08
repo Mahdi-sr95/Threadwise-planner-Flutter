@@ -6,12 +6,9 @@ import 'package:provider/provider.dart';
 import '../models/course.dart';
 import '../models/enums.dart';
 import '../state/courses_provider.dart';
-import '../state/plan_provider.dart';
 
 class EditCourseScreen extends StatefulWidget {
   final String courseId;
-
-  /// If opened from plan screen, pass from="plan" so we can return there.
   final String? from;
 
   const EditCourseScreen({super.key, required this.courseId, this.from});
@@ -95,14 +92,7 @@ class _EditCourseScreenState extends State<EditCourseScreen> {
       studyHours: double.parse(_studyHoursCtrl.text.trim()),
     );
 
-    //Update the course
     await context.read<CoursesProvider>().updateCourse(updated);
-
-    // Regenerate the plan if the initial page was plan
-    if (widget.from == 'plan') {
-      final courses = context.read<CoursesProvider>().courses;
-      await context.read<PlanProvider>().generatePlan(courses);
-    }
 
     if (!mounted) return;
 
@@ -125,9 +115,7 @@ class _EditCourseScreenState extends State<EditCourseScreen> {
       );
     }
 
-    if (!_loadedOnce) {
-      _prefill(course);
-    }
+    if (!_loadedOnce) _prefill(course);
 
     final deadlineText = _deadline == null
         ? 'Pick a date'
@@ -154,14 +142,14 @@ class _EditCourseScreenState extends State<EditCourseScreen> {
                   border: OutlineInputBorder(),
                 ),
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty)
+                  if (v == null || v.trim().isEmpty) {
                     return 'Course name is required';
+                  }
                   if (v.trim().length < 2) return 'Too short';
                   return null;
                 },
               ),
               const SizedBox(height: 12),
-
               TextFormField(
                 controller: _studyHoursCtrl,
                 decoration: const InputDecoration(
@@ -186,7 +174,6 @@ class _EditCourseScreenState extends State<EditCourseScreen> {
                 },
               ),
               const SizedBox(height: 12),
-
               InkWell(
                 onTap: _pickDeadline,
                 borderRadius: BorderRadius.circular(12),
@@ -200,7 +187,6 @@ class _EditCourseScreenState extends State<EditCourseScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-
               DropdownButtonFormField<Difficulty>(
                 initialValue: _difficulty,
                 items: Difficulty.values
@@ -218,9 +204,7 @@ class _EditCourseScreenState extends State<EditCourseScreen> {
                   border: OutlineInputBorder(),
                 ),
               ),
-
               const SizedBox(height: 20),
-
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
@@ -229,7 +213,6 @@ class _EditCourseScreenState extends State<EditCourseScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(

@@ -1,7 +1,7 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:html' as html;
 
-/// Web implementation used by conditional import in CsvExportService.
+/// Web implementation used by conditional import in [CsvExportService].
 /// Must match: Future<void> saveOrShareCsv(String filename, String csvText)
 Future<void> saveOrShareCsv(String filename, String csvText) async {
   final bytes = utf8.encode(csvText);

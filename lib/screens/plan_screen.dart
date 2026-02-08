@@ -17,10 +17,7 @@ class PlanScreen extends StatelessWidget {
 
   void _openEditCourseFromTask(BuildContext context, StudyTask task) {
     final coursesProv = context.read<CoursesProvider>();
-
-    final matches = coursesProv.courses
-        .where((c) => c.name.trim() == task.subject.trim())
-        .toList();
+    final matches = coursesProv.findByName(task.subject);
 
     if (matches.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -30,8 +27,6 @@ class PlanScreen extends StatelessWidget {
     }
 
     final course = matches.first;
-
-    // pass from=plan so EditCourseScreen returns to /plan
     context.go('/courses/${course.id}/edit?from=plan');
   }
 

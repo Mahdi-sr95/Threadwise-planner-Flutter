@@ -1,4 +1,4 @@
-﻿import 'package:device_calendar/device_calendar.dart';
+import 'package:device_calendar/device_calendar.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,9 +13,17 @@ import '../services/ai_course_assistant_service.dart';
 import '../services/calendar_import_service.dart';
 import '../services/llm_client.dart';
 import '../state/courses_provider.dart';
+import '../state/semesters_provider.dart';
 
-/// A lightweight internal draft model for items imported from the device calendar.
-/// User can preview and (un)select drafts before adding them as real Course objects.
+class AddCourseScreen extends StatefulWidget {
+  const AddCourseScreen({super.key});
+
+  @override
+  State<AddCourseScreen> createState() => _AddCourseScreenState();
+}
+
+/// Draft model for a course imported from the device calendar.
+/// Used only inside this screen to preview and filter events.
 class _ImportedCourseDraft {
   final String name;
   final DateTime deadline;
@@ -39,17 +47,6 @@ class _ImportedCourseDraft {
   }
 }
 
-/// Screen for adding a new course with:
-/// - Manual form (name/deadline/difficulty/studyHours)
-/// - Optional AI assistant parsing (HuggingFace)
-/// - Optional Calendar import (Android/iOS)
-class AddCourseScreen extends StatefulWidget {
-  const AddCourseScreen({super.key});
-
-  @override
-  State<AddCourseScreen> createState() => _AddCourseScreenState();
-}
-
 class _AddCourseScreenState extends State<AddCourseScreen> {
   // -------------------------
   // Manual form state
@@ -61,10 +58,11 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
   DateTime? _deadline;
   Difficulty _difficulty = Difficulty.medium;
 
+  String? _selectedSemesterId;
+
   // -------------------------
   // AI assistant state
   // -------------------------
-  // Must NOT be auto-cleared on incomplete/unrelated; only clear on explicit user action.
   final _aiTextCtrl = TextEditingController();
   bool _aiLoading = false;
   AiCourseParseResult? _aiResult;
@@ -79,6 +77,20 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
   final Set<int> _calSelected = <int>{};
 
   @override
+  void initState() {
+    super.initState();
+
+    // Initialize local semester selection from SemestersProvider after first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final semProv = context.read<SemestersProvider>();
+      setState(() {
+        _selectedSemesterId ??= semProv.selectedSemesterId;
+      });
+    });
+  }
+
+  @override
   void dispose() {
     _nameCtrl.dispose();
     _studyHoursCtrl.dispose();
@@ -90,7 +102,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
   // Helpers
   // -------------------------
 
-  /// Date picker for manual deadline selection.
+  /// Shows a date picker and stores the selected deadline as a pure date.
   Future<void> _pickDeadline() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -101,17 +113,20 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     );
 
     if (picked != null) {
-      setState(() => _deadline = DateTime(picked.year, picked.month, picked.day));
+      setState(
+        () => _deadline = DateTime(picked.year, picked.month, picked.day),
+      );
     }
   }
 
-  /// Format date as YYYY-MM-DD.
+  /// Formats a DateTime as YYYY-MM-DD for display.
   String _formatDate(DateTime d) {
     final mm = d.month.toString().padLeft(2, '0');
     final dd = d.day.toString().padLeft(2, '0');
     return '${d.year}-$mm-$dd';
   }
 
+  /// Maps input status to a color used in the AI status message.
   Color _statusColor(InputStatus status, BuildContext context) {
     switch (status) {
       case InputStatus.complete:
@@ -123,7 +138,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     }
   }
 
-  /// MVP heuristic: suggest hours based on how close the deadline is.
+  /// Simple heuristic to suggest study hours based on time remaining.
   double _suggestStudyHours(DateTime deadline) {
     final today = DateTime.now();
     final d0 = DateTime(today.year, today.month, today.day);
@@ -137,27 +152,41 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     return 8.0;
   }
 
+  /// Returns the effective semester id to use when adding courses.
+  String? _resolveSemesterId() {
+    final semProv = context.read<SemestersProvider>();
+    return _selectedSemesterId ?? semProv.selectedSemesterId;
+  }
+
   // -------------------------
   // Manual save
   // -------------------------
 
-  /// Validate and save the course (manual form).
-  Future<void> _save() async {
+  /// Validates the manual form and adds a single course to the current semester.
+  Future<void> _saveManual() async {
     final ok = _formKey.currentState?.validate() ?? false;
     if (!ok) return;
 
     if (_deadline == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a deadline')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select a deadline')));
       return;
     }
 
     final hours = double.tryParse(_studyHoursCtrl.text.trim());
     if (hours == null || hours <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter valid study hours')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter valid study hours')));
+      return;
+    }
+
+    final semesterId = _resolveSemesterId();
+    if (semesterId == null || semesterId.trim().isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select a semester')));
       return;
     }
 
@@ -168,7 +197,10 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       studyHours: hours,
     );
 
-    await context.read<CoursesProvider>().addCourse(course);
+    await context.read<CoursesProvider>().addCourse(
+      course,
+      semesterId: semesterId,
+    );
 
     if (!mounted) return;
     context.go('/courses');
@@ -178,6 +210,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
   // AI assistant logic
   // -------------------------
 
+  /// Sends user text to the AI backend and displays a structured preview.
   Future<void> _analyzeAiText() async {
     final token = Secrets.huggingFaceToken.trim();
 
@@ -190,29 +223,37 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
       return;
     }
 
+    final text = _aiTextCtrl.text.trim();
+    if (text.isEmpty) {
+      setState(() {
+        _aiError = 'Please paste some text first.';
+        _aiResult = null;
+      });
+      return;
+    }
+
     setState(() {
       _aiLoading = true;
       _aiError = null;
       _aiResult = null;
     });
 
-    final service = AiCourseAssistantService(
-      LLMClient(apiToken: token),
-    );
+    final service = AiCourseAssistantService(LLMClient(apiToken: token));
 
     try {
-      final result = await service.analyzeAndExtractCourses(_aiTextCtrl.text);
+      final result = await service.analyzeAndExtractCourses(text);
       if (!mounted) return;
       setState(() => _aiResult = result);
     } catch (e) {
       if (!mounted) return;
 
       final msg = e.toString();
-      if (msg.contains('Failed host lookup') || msg.contains('SocketException')) {
-        setState(
-          () => _aiError =
-              'AI request failed due to network/DNS. Check internet/VPN/Private DNS.\nDetails: $e',
-        );
+      if (msg.contains('Failed host lookup') ||
+          msg.contains('SocketException')) {
+        setState(() {
+          _aiError =
+              'AI request failed due to network/DNS. Check internet/VPN/Private DNS.\nDetails: $e';
+        });
       } else {
         setState(() => _aiError = 'Unexpected error: $e');
       }
@@ -224,9 +265,18 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     }
   }
 
+  /// Confirms the AI preview and adds all parsed courses to the selected semester.
   Future<void> _confirmAndAddAiCourses() async {
     final result = _aiResult;
     if (result == null || !result.canAddCourses) return;
+
+    final semesterId = _resolveSemesterId();
+    if (semesterId == null || semesterId.trim().isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select a semester')));
+      return;
+    }
 
     final provider = context.read<CoursesProvider>();
 
@@ -237,7 +287,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
     try {
       for (final draft in result.courses) {
-        await provider.addCourse(draft.toCourse());
+        await provider.addCourse(draft.toCourse(), semesterId: semesterId);
       }
 
       if (!mounted) return;
@@ -246,7 +296,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
         SnackBar(content: Text('Added ${result.courses.length} course(s).')),
       );
 
-      // Do NOT clear AI text automatically.
+      // Do NOT clear AI text automatically; only on explicit user action.
       context.go('/courses');
     } catch (e) {
       if (!mounted) return;
@@ -263,6 +313,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
   // Calendar import logic
   // -------------------------
 
+  /// Lets the user select a calendar source when multiple are available.
   Future<Calendar?> _pickCalendar(List<Calendar> calendars) async {
     // Filter out unusable calendars (no id).
     final usable = calendars.where((c) => c.id != null).toList();
@@ -302,10 +353,14 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     );
   }
 
+  /// Imports upcoming events from the device calendar and builds draft courses.
   Future<void> _importFromCalendar() async {
     if (kIsWeb) {
+      // Plugin is not available on web; show a friendly message.
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Calendar import is available on Android/iOS only.')),
+        const SnackBar(
+          content: Text('Calendar import is available on Android/iOS only.'),
+        ),
       );
       return;
     }
@@ -369,6 +424,7 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
         final deadline = DateTime(start.year, start.month, start.day);
         final key = '${title.toLowerCase()}|${_formatDate(deadline)}';
 
+        // Avoid duplicates by title+date key.
         if (seen.contains(key)) continue;
         seen.add(key);
 
@@ -389,8 +445,12 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
         _calDrafts = drafts;
         _calSelected
           ..clear()
-          ..addAll(List<int>.generate(drafts.length, (i) => i)); // default: select all
-        _calError = drafts.isEmpty ? 'No usable events found in the selected time range.' : null;
+          ..addAll(
+            List<int>.generate(drafts.length, (i) => i),
+          ); // default: select all
+        _calError = drafts.isEmpty
+            ? 'No usable events found in the selected time range.'
+            : null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -407,8 +467,17 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
     }
   }
 
+  /// Confirms selected calendar drafts and adds them as real courses.
   Future<void> _confirmAndAddCalendarDrafts() async {
     if (_calDrafts.isEmpty || _calSelected.isEmpty) return;
+
+    final semesterId = _resolveSemesterId();
+    if (semesterId == null || semesterId.trim().isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select a semester')));
+      return;
+    }
 
     final provider = context.read<CoursesProvider>();
 
@@ -419,15 +488,19 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
     try {
       var added = 0;
-
       final selected = _calSelected.toList()..sort();
+
       for (final i in selected) {
         if (i < 0 || i >= _calDrafts.length) continue;
-        await provider.addCourse(_calDrafts[i].toCourse());
+        await provider.addCourse(
+          _calDrafts[i].toCourse(),
+          semesterId: semesterId,
+        );
         added++;
       }
 
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Imported $added course(s) from calendar.')),
       );
@@ -450,7 +523,14 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final deadlineText = _deadline == null ? 'Pick a date' : _formatDate(_deadline!);
+    final semProv = context.watch<SemestersProvider>();
+    final semesters = semProv.semesters;
+
+    final effectiveSemesterId =
+        _selectedSemesterId ?? semProv.selectedSemesterId;
+    final deadlineText = _deadline == null
+        ? 'Pick a date'
+        : _formatDate(_deadline!);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Add Course')),
@@ -461,6 +541,57 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
             padding: const EdgeInsets.all(16),
             children: [
               // -------------------------
+              // Semester selection
+              // -------------------------
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Semester',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: effectiveSemesterId,
+                        items: semesters
+                            .map(
+                              (s) => DropdownMenuItem(
+                                value: s.id,
+                                child: Text(s.name),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) {
+                          if (v == null) return;
+                          setState(() => _selectedSemesterId = v);
+                          // Keep global selection in sync too.
+                          semProv.selectSemester(v);
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'Selected semester',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () => context.push('/semesters'),
+                          icon: const Icon(Icons.tune),
+                          label: const Text('Manage semesters'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // -------------------------
               // AI Assistant
               // -------------------------
               Card(
@@ -469,7 +600,10 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Add with AI (optional)', style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        'Add with AI (optional)',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 8),
                       const Text(
                         'Paste a description of your courses/exams. The AI will validate your text and show a preview before adding.',
@@ -490,7 +624,12 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                       if (_aiLoading) const LinearProgressIndicator(),
                       if (_aiError != null) ...[
                         const SizedBox(height: 10),
-                        Text(_aiError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                        Text(
+                          _aiError!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
                       ],
                       if (_aiResult != null) ...[
                         const SizedBox(height: 10),
@@ -517,7 +656,8 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                             onPressed: _aiLoading
                                 ? null
                                 : () {
-                                    _aiTextCtrl.clear(); // only on explicit user action
+                                    _aiTextCtrl
+                                        .clear(); // only on explicit user action
                                     setState(() {
                                       _aiResult = null;
                                       _aiError = null;
@@ -549,7 +689,9 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton(
-                            onPressed: _aiLoading ? null : _confirmAndAddAiCourses,
+                            onPressed: _aiLoading
+                                ? null
+                                : _confirmAndAddAiCourses,
                             child: const Text('Confirm & Add courses'),
                           ),
                         ),
@@ -582,14 +724,21 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                       if (_calLoading) const LinearProgressIndicator(),
                       if (_calError != null) ...[
                         const SizedBox(height: 10),
-                        Text(_calError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                        Text(
+                          _calError!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
                       ],
                       const SizedBox(height: 10),
                       Row(
                         children: [
                           Expanded(
                             child: FilledButton.icon(
-                              onPressed: _calLoading ? null : _importFromCalendar,
+                              onPressed: _calLoading
+                                  ? null
+                                  : _importFromCalendar,
                               icon: const Icon(Icons.calendar_month),
                               label: const Text('Import events'),
                             ),
@@ -612,7 +761,10 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                       if (_calDrafts.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         const Divider(),
-                        Text('Preview (${_calDrafts.length})', style: Theme.of(context).textTheme.titleSmall),
+                        Text(
+                          'Preview (${_calDrafts.length})',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
                         const SizedBox(height: 8),
                         ...List.generate(_calDrafts.length, (i) {
                           final d = _calDrafts[i];
@@ -642,8 +794,12 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton(
-                            onPressed: (_calLoading || _calSelected.isEmpty) ? null : _confirmAndAddCalendarDrafts,
-                            child: Text('Add selected (${_calSelected.length})'),
+                            onPressed: (_calLoading || _calSelected.isEmpty)
+                                ? null
+                                : _confirmAndAddCalendarDrafts,
+                            child: Text(
+                              'Add selected (${_calSelected.length})',
+                            ),
                           ),
                         ),
                       ],
@@ -657,11 +813,16 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
               // -------------------------
               // Manual form
               // -------------------------
-              Text('Course details', style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                'Course details',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const SizedBox(height: 8),
-              Text('Enter the course info, then save.', style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                'Enter the course info, then save.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
               const SizedBox(height: 16),
-
               TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(
@@ -671,14 +832,13 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                 ),
                 textInputAction: TextInputAction.next,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Course name is required';
-                  if (v.trim().length < 2) return 'Too short';
+                  final value = (v ?? '').trim();
+                  if (value.isEmpty) return 'Course name is required';
+                  if (value.length < 2) return 'Too short';
                   return null;
                 },
               ),
-
               const SizedBox(height: 12),
-
               TextFormField(
                 controller: _studyHoursCtrl,
                 decoration: const InputDecoration(
@@ -687,20 +847,25 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                   border: OutlineInputBorder(),
                   suffixText: 'hours',
                 ),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}')),
+                ],
                 textInputAction: TextInputAction.next,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Study hours required';
-                  final numValue = double.tryParse(v.trim());
-                  if (numValue == null || numValue <= 0) return 'Enter a valid positive number';
+                  final value = (v ?? '').trim();
+                  if (value.isEmpty) return 'Study hours required';
+                  final numValue = double.tryParse(value);
+                  if (numValue == null || numValue <= 0) {
+                    return 'Enter a valid positive number';
+                  }
                   if (numValue > 200) return 'Too many hours (max 200)';
                   return null;
                 },
               ),
-
               const SizedBox(height: 12),
-
               InkWell(
                 onTap: _pickDeadline,
                 borderRadius: BorderRadius.circular(12),
@@ -713,34 +878,33 @@ class _AddCourseScreenState extends State<AddCourseScreen> {
                   child: Text(deadlineText),
                 ),
               ),
-
               const SizedBox(height: 12),
-
               DropdownButtonFormField<Difficulty>(
                 initialValue: _difficulty,
                 items: Difficulty.values
                     .map(
                       (d) => DropdownMenuItem(
                         value: d,
-                        child: Text(d.name[0].toUpperCase() + d.name.substring(1)),
+                        child: Text(d.displayName),
                       ),
                     )
                     .toList(),
-                onChanged: (v) => setState(() => _difficulty = v ?? Difficulty.medium),
+                onChanged: (v) =>
+                    setState(() => _difficulty = v ?? Difficulty.medium),
                 decoration: const InputDecoration(
                   labelText: 'Difficulty',
                   border: OutlineInputBorder(),
                 ),
               ),
-
               const SizedBox(height: 20),
-
               SizedBox(
                 width: double.infinity,
-                child: FilledButton(onPressed: _save, child: const Text('Save')),
+                child: FilledButton(
+                  onPressed: _saveManual,
+                  child: const Text('Save'),
+                ),
               ),
               const SizedBox(height: 8),
-
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
