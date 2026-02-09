@@ -9,20 +9,24 @@ class Course {
   final Difficulty difficulty;
   final double studyHours;
   final DateTime createdAt;
+  final String semesterId;
 
   Course({
     String? id,
+    String? semesterId,
     required this.name,
     required this.deadline,
     required this.difficulty,
     required this.studyHours,
     DateTime? createdAt,
-  })  : id = id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        createdAt = createdAt ?? DateTime.now();
+  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString(),
+       semesterId = semesterId ?? 'default',
+       createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'semesterId': semesterId,
       'name': name,
       'deadline': deadline.toIso8601String(),
       'difficulty': difficulty.name,
@@ -46,6 +50,7 @@ class Course {
 
   Course copyWith({
     String? id,
+    String? semesterId,
     String? name,
     DateTime? deadline,
     Difficulty? difficulty,
@@ -54,6 +59,7 @@ class Course {
   }) {
     return Course(
       id: id ?? this.id,
+      semesterId: semesterId ?? this.semesterId,
       name: name ?? this.name,
       deadline: deadline ?? this.deadline,
       difficulty: difficulty ?? this.difficulty,
@@ -64,7 +70,7 @@ class Course {
 
   @override
   String toString() {
-    return 'Course(id: $id, name: $name, deadline: $deadline, difficulty: ${difficulty.name}, studyHours: $studyHours)';
+    return 'Course(id: $id, semesterId: $semesterId, name: $name, deadline: $deadline, difficulty: ${difficulty.name}, studyHours: $studyHours)';
   }
 
   @override

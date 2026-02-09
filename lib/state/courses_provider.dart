@@ -1,66 +1,107 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/course.dart';
-import '../repositories/shared_prefs_course_repository.dart';
 
-/// Provider for managing courses with local persistence (SharedPreferences JSON).
 class CoursesProvider extends ChangeNotifier {
-  final SharedPrefsCourseRepository _repository = SharedPrefsCourseRepository();
+  static const _key = 'courses_by_semester';
 
-  List<Course> _courses = <Course>[];
-  bool _initialized = false;
+  SharedPreferences? _prefs;
 
-  List<Course> get courses => List.unmodifiable(_courses);
+  // semesterId -> list of courses
+  final Map<String, List<Course>> _bySemester = {};
+
+  String? _selectedSemesterId;
 
   Future<void> init() async {
-    if (_initialized) return;
-    await _repository.init();
-    await _loadCourses();
-    _initialized = true;
+    _prefs = await SharedPreferences.getInstance();
+    await _load();
   }
 
-  Future<void> _loadCourses() async {
-    _courses = await _repository.getAllCourses();
+  void setSelectedSemester(String semesterId) {
+    _selectedSemesterId = semesterId;
     notifyListeners();
   }
 
+  String? get selectedSemesterId => _selectedSemesterId;
+
+  /// ✅ current semester courses (what your UI expects)
+  List<Course> get courses => coursesForSelectedSemester;
+
+  List<Course> get coursesForSelectedSemester {
+    final id = _selectedSemesterId;
+    if (id == null) return const [];
+    return List.unmodifiable(_bySemester[id] ?? const []);
+  }
+
   Course? getById(String id) {
-    try {
-      return _courses.firstWhere((c) => c.id == id);
-    } catch (_) {
-      return null;
+    for (final entry in _bySemester.entries) {
+      final idx = entry.value.indexWhere((c) => c.id == id);
+      if (idx != -1) return entry.value[idx];
     }
+    return null;
   }
 
-  Future<void> addCourse(Course course) async {
-    await _repository.saveCourse(course);
-    await _loadCourses();
+  List<Course> findByName(String name) {
+    final wanted = name.trim().toLowerCase();
+    final out = <Course>[];
+    for (final entry in _bySemester.entries) {
+      out.addAll(
+        entry.value.where((c) => c.name.trim().toLowerCase() == wanted),
+      );
+    }
+    return out;
   }
 
-  Future<void> updateCourse(Course course) async {
-    await _repository.updateCourse(course); // saveCourse would also work
-    await _loadCourses();
+  Future<void> addCourse(Course course, {required String semesterId}) async {
+    final list = _bySemester.putIfAbsent(semesterId, () => <Course>[]);
+    list.add(course);
+    await _save();
+    notifyListeners();
   }
 
   Future<void> removeAt(int index) async {
-    if (index < 0 || index >= _courses.length) return;
-    final courseId = _courses[index].id;
-    await _repository.deleteCourse(courseId);
-    await _loadCourses();
+    final id = _selectedSemesterId;
+    if (id == null) return;
+    final list = _bySemester[id];
+    if (list == null || index < 0 || index >= list.length) return;
+
+    list.removeAt(index);
+    await _save();
+    notifyListeners();
   }
 
-  Future<void> deleteById(String id) async {
-    await _repository.deleteCourse(id);
-    await _loadCourses();
+  Future<void> updateCourse(Course updated) async {
+    for (final entry in _bySemester.entries) {
+      final idx = entry.value.indexWhere((c) => c.id == updated.id);
+      if (idx != -1) {
+        entry.value[idx] = updated;
+        await _save();
+        notifyListeners();
+        return;
+      }
+    }
   }
 
-  Future<void> clearAll() async {
-    await _repository.deleteAllCourses();
-    await _loadCourses();
+  Future<void> _load() async {
+    final raw = _prefs?.getString(_key);
+    if (raw == null || raw.isEmpty) return;
+
+    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    _bySemester.clear();
+
+    for (final e in decoded.entries) {
+      final listJson = (e.value as List).cast<Map<String, dynamic>>();
+      _bySemester[e.key] = listJson.map(Course.fromJson).toList();
+    }
   }
 
-  @override
-  void dispose() {
-    _repository.close();
-    super.dispose();
+  Future<void> _save() async {
+    final out = <String, dynamic>{};
+    for (final e in _bySemester.entries) {
+      out[e.key] = e.value.map((c) => c.toJson()).toList();
+    }
+    await _prefs?.setString(_key, jsonEncode(out));
   }
 }

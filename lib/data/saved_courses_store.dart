@@ -14,8 +14,9 @@ class SavedCoursesStore {
 
   SharedPreferences get _safePrefs {
     final p = _prefs;
-    if (p == null)
+    if (p == null) {
       throw Exception('SavedCoursesStore not initialized. Call init() first.');
+    }
     return p;
   }
 

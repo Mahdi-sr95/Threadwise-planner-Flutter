@@ -6,55 +6,33 @@ import '../models/enums.dart';
 import '../state/settings_provider.dart';
 import '../state/courses_provider.dart';
 import '../state/plan_provider.dart';
+import '../state/semesters_provider.dart';
 
 class CoursesScreen extends StatelessWidget {
   const CoursesScreen({super.key});
-
-  Future<void> _confirmDelete(
-    BuildContext context, {
-    required String courseName,
-    required VoidCallback onDelete,
-  }) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete course?'),
-        content: Text('This will remove "$courseName" from your courses.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (ok == true) onDelete();
-  }
 
   @override
   Widget build(BuildContext context) {
     final coursesProv = context.watch<CoursesProvider>();
     final planProv = context.watch<PlanProvider>();
-    final courses = coursesProv.courses;
+    final semProv = context.watch<SemestersProvider>();
+
+    final courses = coursesProv.coursesForSelectedSemester;
+    final semesterName = semProv.selectedSemester?.name ?? 'Default';
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Courses'),
         actions: [
           IconButton(
-            onPressed: () => context.go('/courses/add'),
-            icon: const Icon(Icons.add),
-            tooltip: 'Add course',
+            tooltip: 'Semesters',
+            icon: const Icon(Icons.school),
+            onPressed: () => context.go('/semesters'),
           ),
           IconButton(
-            tooltip: 'Select an earlier course',
-            icon: const Icon(Icons.bookmarks_outlined),
-            onPressed: () => context.push('/saved-courses'),
+            tooltip: 'Saved courses',
+            icon: const Icon(Icons.bookmark_outline),
+            onPressed: () => context.go('/saved-courses'),
           ),
         ],
       ),
@@ -62,20 +40,63 @@ class CoursesScreen extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text('Your courses', style: Theme.of(context).textTheme.titleLarge),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Semester: $semesterName',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () => context.go('/semesters'),
+                  icon: const Icon(Icons.swap_horiz),
+                  label: const Text('Change'),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
+
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => context.go('/saved-courses'),
+                icon: const Icon(Icons.bookmark_outline),
+                label: const Text('Select an earlier course'),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            Text('Your courses', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 10),
+
+            Center(
+              child: SizedBox(
+                width: 260,
+                child: FilledButton.icon(
+                  onPressed: () => context.go('/courses/add'),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add course'),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 14),
 
             if (courses.isEmpty)
               const Card(
                 child: Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text('No courses yet. Tap + to add one.'),
+                  child: Text(
+                    'No courses in this semester yet.\nUse "Add course" above to create one.',
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               )
             else
               ...List.generate(courses.length, (i) {
                 final c = courses[i];
-
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Card(
@@ -84,40 +105,23 @@ class CoursesScreen extends StatelessWidget {
                       subtitle: Text(
                         'Deadline: ${_formatDate(c.deadline)} • ${c.difficulty.displayName} • ${c.studyHours}h',
                       ),
-                      trailing: PopupMenuButton<String>(
-                        tooltip: 'Course actions',
-                        onSelected: (value) async {
-                          if (value == 'edit') {
-                            context.go('/courses/${c.id}/edit?from=courses');
-                          } else if (value == 'delete') {
-                            await _confirmDelete(
-                              context,
-                              courseName: c.name,
-                              onDelete: () => coursesProv.removeAt(i),
-                            );
-                          }
-                        },
-                        itemBuilder: (context) => const [
-                          PopupMenuItem(
-                            value: 'edit',
-                            child: ListTile(
-                              leading: Icon(Icons.edit_outlined),
-                              title: Text('Edit'),
-                            ),
+                      onTap: () => context.go('/courses/${c.id}/edit'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Edit',
+                            icon: const Icon(Icons.edit),
+                            onPressed: () =>
+                                context.go('/courses/${c.id}/edit'),
                           ),
-                          PopupMenuItem(
-                            value: 'delete',
-                            child: ListTile(
-                              leading: Icon(Icons.delete_outline),
-                              title: Text('Delete'),
-                            ),
+                          IconButton(
+                            tooltip: 'Delete',
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => coursesProv.removeAt(i),
                           ),
                         ],
                       ),
-                      onTap: () {
-                        // Optional: tap row to edit too
-                        context.go('/courses/${c.id}/edit?from=courses');
-                      },
                     ),
                   ),
                 );
@@ -164,7 +168,6 @@ class CoursesScreen extends StatelessWidget {
                             .read<SettingsProvider>()
                             .settings;
                         await planProv.generatePlan(courses, settings);
-
                         if (context.mounted) context.go('/plan');
                       },
                 icon: const Icon(Icons.auto_awesome),
@@ -177,7 +180,7 @@ class CoursesScreen extends StatelessWidget {
     );
   }
 
-  String _formatDate(DateTime date) {
+  static String _formatDate(DateTime date) {
     final year = date.year;
     final month = date.month.toString().padLeft(2, '0');
     final day = date.day.toString().padLeft(2, '0');

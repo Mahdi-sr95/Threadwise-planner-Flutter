@@ -1,5 +1,7 @@
-name: threadwise_planner
+﻿name: threadwise_planner
+
 description: "A new Flutter project."
+
 publish_to: "none"
 
 version: 1.0.0+1
@@ -14,6 +16,7 @@ dependencies:
   # State management + routing
   provider: ^6.1.2
   go_router: ^14.6.0
+
   intl: ^0.20.1
 
   # iOS-style icons
@@ -25,11 +28,18 @@ dependencies:
   # Local storage with SharedPreferences
   shared_preferences: ^2.2.2
 
-  table_calendar: ^3.2.0
-  # CSV export
   csv: ^6.0.0
   path_provider: ^2.1.5
   share_plus: ^10.1.4
+
+  # Calendar integration
+  device_calendar: ^4.3.3
+  table_calendar: ^3.1.2
+
+  # Notifications
+  flutter_local_notifications: ^17.2.4
+  timezone: ^0.9.4
+  flutter_timezone: ^3.0.1
 
 dev_dependencies:
   flutter_test:
@@ -37,5 +47,25 @@ dev_dependencies:
 
   flutter_lints: ^6.0.0
 
+  # App icon generator
+  flutter_launcher_icons: ^0.14.4
+
 flutter:
   uses-material-design: true
+
+flutter_launcher_icons:
+  image_path: "assets/icon/app_icon.png"
+  android: true
+  ios: true
+  remove_alpha_ios: true
+
+  web:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    background_color: "#FFF9E3"
+    theme_color: "#1D3557"
+
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 48
