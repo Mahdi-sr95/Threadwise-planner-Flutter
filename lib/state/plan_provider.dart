@@ -15,12 +15,15 @@ class PlanProvider extends ChangeNotifier {
   static const String _historyKey = 'plan_history';
 
   Strategy _strategy = Strategy.waterfall;
-  List<StudyTask> _tasks = <StudyTask>[];
+  final List<StudyTask> _tasks = <StudyTask>[];
   List<SavedPlan> _planHistory = <SavedPlan>[];
+
   bool _loading = false;
   String? _error;
 
   SharedPreferences? _prefs;
+
+  DateTime _selectedDay = DateTime.now();
 
   Strategy get strategy => _strategy;
   List<StudyTask> get tasks => List.unmodifiable(_tasks);
@@ -28,11 +31,13 @@ class PlanProvider extends ChangeNotifier {
   bool get loading => _loading;
   String? get error => _error;
 
+  DateTime get selectedDay =>
+      DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
+
   PlanProvider() {
     _initPrefs();
   }
 
-  /// Initializes SharedPreferences and loads saved history.
   Future<void> _initPrefs() async {
     _prefs = await SharedPreferences.getInstance();
     await _loadHistory();
@@ -44,10 +49,6 @@ class PlanProvider extends ChangeNotifier {
     _strategy = newStrategy;
     notifyListeners();
   }
-
-  DateTime _selectedDay = DateTime.now();
-  DateTime get selectedDay =>
-      DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day);
 
   void setSelectedDay(DateTime day) {
     final d = DateTime(day.year, day.month, day.day);
@@ -75,37 +76,57 @@ class PlanProvider extends ChangeNotifier {
 
     try {
       await Future.delayed(const Duration(milliseconds: 300));
-      _tasks = PlannerService.generatePlan(courses, _strategy);
 
-      //Schedule notifications for the generated plan
-      await NotificationsService.instance.requestPermissionsIfNeeded();
+      final generated = PlannerService.generatePlan(courses, _strategy);
+      _tasks
+        ..clear()
+        ..addAll(generated);
+
+      // Keep selected day sensible
+      if (_tasks.isNotEmpty) {
+        final days = _tasks
+            .map((t) => DateTime(t.dateTime.year, t.dateTime.month, t.dateTime.day))
+            .toList()
+          ..sort();
+        _selectedDay = days.first;
+      }
+
+      // Schedule notifications - never let this crash plan generation
+      await _tryScheduleNotifications();
+    } catch (e) {
+      _tasks.clear();
+      _error = e.toString();
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _tryScheduleNotifications() async {
+    // If no tasks, clear notifications and return
+    if (_tasks.isEmpty) {
+      try {
+        await NotificationsService.instance.cancelAll();
+      } catch (_) {}
+      return;
+    }
+
+    try {
+      final granted =
+          await NotificationsService.instance.requestPermissionsIfNeeded();
+
+      // Even if permission is not granted (e.g., iOS user denied),
+      // do not treat it as a fatal error.
+      if (!granted) return;
+
       await NotificationsService.instance.rescheduleAll(
         tasks: _tasks,
         taskKeyOf: (t) => t.key,
         notifyBefore: Duration.zero, // change to e.g. Duration(minutes: 5)
       );
-
-      // Keep selected day sensible
-      if (_tasks.isNotEmpty) {
-        final first =
-            _tasks
-                .map(
-                  (t) => DateTime(
-                    t.dateTime.year,
-                    t.dateTime.month,
-                    t.dateTime.day,
-                  ),
-                )
-                .toList()
-              ..sort();
-        _selectedDay = first.first;
-      }
     } catch (e) {
-      _tasks = <StudyTask>[];
-      _error = e.toString();
-    } finally {
-      _loading = false;
-      notifyListeners();
+      // Do not crash; just log
+      debugPrint('Notifications scheduling failed: $e');
     }
   }
 
@@ -120,7 +141,6 @@ class PlanProvider extends ChangeNotifier {
     );
 
     _planHistory.insert(0, plan);
-
     if (_planHistory.length > 10) {
       _planHistory = _planHistory.sublist(0, 10);
     }
@@ -132,27 +152,30 @@ class PlanProvider extends ChangeNotifier {
   /// Loads a plan from history into the current state.
   void loadPlan(SavedPlan plan) {
     _strategy = plan.strategy;
-    _tasks = List<StudyTask>.from(plan.tasks);
+
+    _tasks
+      ..clear()
+      ..addAll(plan.tasks);
 
     if (_tasks.isNotEmpty) {
-      final first =
-          _tasks
-              .map(
-                (t) =>
-                    DateTime(t.dateTime.year, t.dateTime.month, t.dateTime.day),
-              )
-              .toList()
-            ..sort();
-      _selectedDay = first.first;
+      final days = _tasks
+          .map((t) => DateTime(t.dateTime.year, t.dateTime.month, t.dateTime.day))
+          .toList()
+        ..sort();
+      _selectedDay = days.first;
 
-      //Reschedule notifications for the loaded plan
-      NotificationsService.instance.rescheduleAll(
-        tasks: _tasks,
-        taskKeyOf: (t) => t.key,
-        notifyBefore: Duration.zero,
-      );
+      // Reschedule notifications for the loaded plan (fire-and-forget safely)
+      NotificationsService.instance
+          .rescheduleAll(
+            tasks: _tasks,
+            taskKeyOf: (t) => t.key,
+            notifyBefore: Duration.zero,
+          )
+          .catchError((e) {
+        debugPrint('Notifications reschedule failed: $e');
+      });
     } else {
-      NotificationsService.instance.cancelAll();
+      NotificationsService.instance.cancelAll().catchError((_) {});
     }
 
     notifyListeners();
@@ -192,21 +215,21 @@ class PlanProvider extends ChangeNotifier {
       _planHistory = jsonList
           .map((e) => SavedPlan.fromJson(e as Map<String, dynamic>))
           .toList();
-      notifyListeners();
     } catch (e) {
       debugPrint('Error loading plan history: $e');
+      _planHistory = <SavedPlan>[];
     }
+
+    notifyListeners();
   }
 
   /// Clears the current plan (does not touch saved history).
   void clearPlan() {
-    _tasks = <StudyTask>[];
+    _tasks.clear();
     _error = null;
     _selectedDay = DateTime.now();
 
-    //Cancel notifications when plan is cleared
-    NotificationsService.instance.cancelAll();
-
+    NotificationsService.instance.cancelAll().catchError((_) {});
     notifyListeners();
   }
 }

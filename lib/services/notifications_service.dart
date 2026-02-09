@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -8,10 +6,10 @@ import 'notifications_timezone.dart';
 
 class NotificationsService {
   NotificationsService._();
+
   static final NotificationsService instance = NotificationsService._();
 
-  final FlutterLocalNotificationsPlugin _plugin =
-      FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
 
@@ -19,40 +17,52 @@ class NotificationsService {
   static const String _channelName = 'Study sessions';
   static const String _channelDesc = 'Reminders when a study session starts';
 
-  // Used only to create the Android notification channel
-  static const AndroidNotificationChannel _androidChannel =
-      AndroidNotificationChannel(
-        _channelId,
-        _channelName,
-        description: _channelDesc,
-        importance: Importance.max,
-      );
+  static const AndroidNotificationChannel _androidChannel = AndroidNotificationChannel(
+    _channelId,
+    _channelName,
+    description: _channelDesc,
+    importance: Importance.max,
+  );
+
+  bool get isSupportedPlatform {
+    if (kIsWeb) return false;
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+      case TargetPlatform.macOS:
+        return true;
+      default:
+        return false;
+    }
+  }
 
   Future<void> init() async {
     if (_initialized) return;
+    if (!isSupportedPlatform) return;
 
     await NotificationsTimezone.init();
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings(
+
+    const darwinInit = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
       requestSoundPermission: false,
     );
 
+    // در 17.2.4 پارامتر macOS هم وجود دارد
     const initSettings = InitializationSettings(
       android: androidInit,
-      iOS: iosInit,
+      iOS: darwinInit,
+      macOS: darwinInit,
     );
 
     await _plugin.initialize(initSettings);
 
     // Ensure Android channel exists
-    if (!kIsWeb && Platform.isAndroid) {
-      final android = _plugin
-          .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin
-          >();
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
       await android?.createNotificationChannel(_androidChannel);
     }
 
@@ -60,15 +70,12 @@ class NotificationsService {
   }
 
   Future<bool> requestPermissionsIfNeeded() async {
+    if (!isSupportedPlatform) return false;
     if (!_initialized) await init();
 
-    if (kIsWeb) return false;
-
-    if (Platform.isIOS || Platform.isMacOS) {
-      final ios = _plugin
-          .resolvePlatformSpecificImplementation<
-            IOSFlutterLocalNotificationsPlugin
-          >();
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      final ios = _plugin.resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin>();
       return await ios?.requestPermissions(
             alert: true,
             badge: true,
@@ -77,21 +84,28 @@ class NotificationsService {
           false;
     }
 
-    if (Platform.isAndroid) {
-      final android = _plugin
-          .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin
-          >();
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      final mac = _plugin.resolvePlatformSpecificImplementation<
+          MacOSFlutterLocalNotificationsPlugin>();
+      return await mac?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          ) ??
+          false;
+    }
+
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
       // Android 13+ runtime permission
       return await android?.requestNotificationsPermission() ?? true;
     }
 
-    // Windows/Linux: no typical permission prompt
-    return true;
+    return false;
   }
 
   NotificationDetails _details() {
-    // Not const, because values come from non-const context sometimes
     final androidDetails = AndroidNotificationDetails(
       _channelId,
       _channelName,
@@ -120,11 +134,11 @@ class NotificationsService {
     required StudyTask task,
     Duration? notifyBefore,
   }) async {
+    if (!isSupportedPlatform) return;
     if (!_initialized) await init();
 
     final now = DateTime.now();
     final whenLocal = task.dateTime.subtract(notifyBefore ?? Duration.zero);
-
     if (!whenLocal.isAfter(now)) return;
 
     final tzWhen = NotificationsTimezone.toLocalTzDateTime(whenLocal);
@@ -143,11 +157,13 @@ class NotificationsService {
   }
 
   Future<void> cancelTask(String taskKey) async {
+    if (!isSupportedPlatform) return;
     if (!_initialized) await init();
     await _plugin.cancel(_idFromKey(taskKey));
   }
 
   Future<void> cancelAll() async {
+    if (!isSupportedPlatform) return;
     if (!_initialized) await init();
     await _plugin.cancelAll();
   }
@@ -157,19 +173,27 @@ class NotificationsService {
     required String Function(StudyTask) taskKeyOf,
     Duration? notifyBefore,
   }) async {
+    if (!isSupportedPlatform) return;
     if (!_initialized) await init();
-    await cancelAll();
 
-    for (final t in tasks) {
-      await scheduleTaskStart(
-        taskKey: taskKeyOf(t),
-        task: t,
-        notifyBefore: notifyBefore,
-      );
+    try {
+      await cancelAll();
+
+      for (final t in tasks) {
+        await scheduleTaskStart(
+          taskKey: taskKeyOf(t),
+          task: t,
+          notifyBefore: notifyBefore,
+        );
+      }
+    } catch (e) {
+      // Never crash callers
+      debugPrint('rescheduleAll failed: $e');
     }
   }
 
   Future<void> showNow({required String title, required String body}) async {
+    if (!isSupportedPlatform) return;
     if (!_initialized) await init();
     await _plugin.show(999999, title, body, _details());
   }
