@@ -13,8 +13,8 @@ lib/
 
 ## Team
 
-- Marcus: UI, Navigation, Storage, State Management
-- Mahdi: LLM Integration, Algorithms, Business Logic
+- Marcus Larsen-Frivoll: UI, Navigation, Storage, State Management
+- Mahdi Soltani Renani: LLM Integration, Algorithms, Business Logic
 
 ## Getting Started
 
